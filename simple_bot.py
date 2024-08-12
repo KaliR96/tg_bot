@@ -5,7 +5,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # Настраиваем логирование
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levellevelname)s - %(message)s',
     level=logging.INFO
 )
 
@@ -29,26 +29,49 @@ MENU_TREE = {
             'Калькулятор': 'calculator_menu',
             'Заказать клининг': 'order_cleaning',
             'Связаться': 'contact'
-        }
+        },
+        'fallback': 'Пожалуйста, выберите опцию из меню.'
     },
     'calculator_menu': {
         'message': 'Выберите тип уборки:',
         'options': ['Ген.уборка', 'Повседневная', 'Послестрой', 'Мытье окон', 'В начало'],
         'next_state': {
-            'Ген.уборка': 'enter_square_meters',
-            'Повседневная': 'enter_square_meters',
-            'Послестрой': 'enter_square_meters',
-            'Мытье окон': 'enter_square_meters',
+            'Ген.уборка': 'calculator_menu.enter_square_meters',
+            'Повседневная': 'calculator_menu.enter_square_meters',
+            'Послестрой': 'calculator_menu.enter_square_meters',
+            'Мытье окон': 'calculator_menu.enter_square_meters',
             'В начало': 'main_menu'
         },
+        'fallback': 'Пожалуйста, выберите тип уборки из списка.',
         'enter_square_meters': {
             'message': 'Введите количество квадратных метров:',
             'options': ['В начало'],
-            'calculate': True  # Это специальный ключ для обработки калькуляции
+            'run': 'calculate',
+            'fallback': 'Пожалуйста, введите корректное количество квадратных метров.'
+        }
+    },
+    'show_tariffs': {
+        'message': '\n'.join([f"{name}: {price} руб./кв.м" for name, price in CLEANING_PRICES.items()]),
+        'options': ['В начало'],
+        'next_state': {
+            'В начало': 'main_menu'
+        }
+    },
+    'order_cleaning': {
+        'message': 'Для заказа клининга свяжитесь с нами по телефону +7 (123) 456-78-90 или оставьте заявку на сайте.',
+        'options': ['В начало'],
+        'next_state': {
+            'В начало': 'main_menu'
+        }
+    },
+    'contact': {
+        'message': 'Связаться с нами вы можете по телефону +7 (123) 456-78-90 или через email: clean@example.com.',
+        'options': ['В начало'],
+        'next_state': {
+            'В начало': 'main_menu'
         }
     }
 }
-
 
 # Функция для отправки сообщения с заданной клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
@@ -56,52 +79,52 @@ async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, messa
     await update.message.reply_text(message, reply_markup=reply_markup)
     logger.info("Отправлено сообщение: %s", message)
 
+# Функция для обработки калькуляции
+async def calculate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        sqm = float(update.message.text)
+        price_per_sqm = context.user_data.get('price_per_sqm')
+        total_cost = price_per_sqm * sqm
+        await send_message(update, context, f'Стоимость уборки: {total_cost:.2f} руб.', ['В начало'])
+        context.user_data['state'] = 'main_menu'
+    except ValueError:
+        fallback_message = MENU_TREE['calculator_menu']['enter_square_meters']['fallback']
+        await send_message(update, context, fallback_message, ['В начало'])
 
 # Функция обработки переходов между состояниями
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_state = context.user_data.get('state', 'main_menu')
     logger.info("Текущее состояние: %s", user_state)
 
-    menu = MENU_TREE.get(user_state)
+    menu_path = user_state.split('.')
+    menu = MENU_TREE
+    for key in menu_path:
+        menu = menu.get(key)
+
     user_choice = update.message.text
 
-    # Если пользователь находится в calculator_menu
-    if user_state == 'calculator_menu' and user_choice in CLEANING_PRICES:
-        context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
-        next_menu = menu['enter_square_meters']
-        context.user_data['state'] = 'calculator_menu_enter_square_meters'
-        await send_message(update, context, next_menu['message'], next_menu['options'])
-    elif user_state == 'calculator_menu_enter_square_meters':
-        try:
-            sqm = float(user_choice)
-            price_per_sqm = context.user_data.get('price_per_sqm')
-            total_cost = price_per_sqm * sqm
-            await send_message(update, context, f'Стоимость уборки: {total_cost:.2f} руб.', ['В начало'])
-            context.user_data['state'] = 'main_menu'
-        except ValueError:
-            await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.',
-                               ['В начало'])
+    # Если в текущем меню есть 'run', то запускаем соответствующую функцию
+    if 'run' in menu:
+        handler = globals()[menu['run']]
+        await handler(update, context)
+    elif user_choice in menu['next_state']:
+        next_state = menu['next_state'][user_choice]
+        context.user_data['state'] = next_state
+
+        next_menu = MENU_TREE
+        for key in next_state.split('.'):
+            next_menu = next_menu.get(key)
+
+        if next_menu:
+            await send_message(update, context, next_menu['message'], next_menu['options'])
     else:
-        # Проверка, если выбранная опция ведет на следующий уровень
-        if user_choice in menu['next_state']:
-            next_state = menu['next_state'][user_choice]
-            context.user_data['state'] = next_state
-
-            # Переход на следующий уровень меню
-            next_menu = MENU_TREE.get(next_state)
-            if next_menu:
-                await send_message(update, context, next_menu['message'], next_menu['options'])
-        else:
-            # Если выбрана некорректная опция
-            await send_message(update, context, 'Пожалуйста, выберите опцию из меню.', menu['options'])
-
+        await send_message(update, context, menu['fallback'], menu['options'])
 
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data['state'] = 'main_menu'
     menu = MENU_TREE['main_menu']
     await send_message(update, context, menu['message'], menu['options'])
-
 
 # Основная функция, которая отвечает за запуск бота
 def main():
@@ -117,11 +140,4 @@ def main():
     application.add_handler(CommandHandler("start", start))
 
     # Обработчик всех текстовых сообщений
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Запускаем бота
-    application.run_polling()
-
-
-if __name__ == '__main__':
-    main()
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle
