@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
 import logging
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import sys
 
 # Настраиваем логирование
 logging.basicConfig(
@@ -101,88 +101,58 @@ MENU_TREE = {
     }
 }
 
-
 # Функция для отправки сообщения с заданной клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
     reply_markup = ReplyKeyboardMarkup([options], resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(message, reply_markup=reply_markup)
     logger.info("Отправлено сообщение: %s", message)
 
-
-# Функция-фильтр для выполнения расчетов
-def calculate(context: ContextTypes.DEFAULT_TYPE, **kwargs) -> dict:
-    price_per_sqm = context.user_data.get('price_per_sqm')
-    sqm = float(kwargs.get('user_choice'))
+# Функция для расчета стоимости уборки
+def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
+    formatted_message = MENU_TREE['calculate_result']['message'].format(total_cost=total_cost)
     return {
         'total_cost': total_cost,
-        'formatted_message': f'Стоимость уборки: {total_cost:.2f} руб.'
+        'formatted_message': formatted_message
     }
 
-
-# Функция для обработки заявки на клининг
-async def order_cleaning_now_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Логика отправки сообщения владельцу бота
-    await send_message(update, context, 'Ваша заявка принята и обрабатывается. Ожидайте!', ['В начало'])
-    context.user_data['state'] = 'main_menu'
-
-
-# Универсальная функция для вызова действий
-async def run_action(action_name: str, update: Update, context: ContextTypes.DEFAULT_TYPE, **kwargs):
-    action_map = {
-        'calculate': calculate,
-        'order_cleaning_now_func': order_cleaning_now_func
-    }
-
-    if action_name in action_map:
-        action = action_map[action_name]
-        if action_name == 'calculate':
-            result = action(context, **kwargs)
-            message = MENU_TREE[context.user_data['state']]['message'].format(**result)
-            await send_message(update, context, message, ['В начало'])
-            context.user_data['state'] = 'main_menu'
-        elif action_name == 'order_cleaning_now_func':
-            await action(update, context)
-
-
-# Функция обработки переходов между состояниями
+# Универсальная функция для обработки переходов между состояниями
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_state = context.user_data.get('state', 'main_menu')
     logger.info("Текущее состояние: %s", user_state)
 
-    # Получаем текущее меню
     menu = MENU_TREE.get(user_state)
     user_choice = update.message.text
 
-    # Проверяем наличие функции 'run' для выполнения
     if 'run' in menu:
-        await run_action(menu['run'], update, context, user_choice=user_choice)
-        return
-
-    # Проверяем, есть ли следующий уровень меню
-    if user_choice in CLEANING_PRICES and user_state == 'calculator_menu':
+        # Запуск функции по имени из поля 'run'
+        function_name = menu['run']
+        if hasattr(sys.modules[__name__], function_name):
+            result = getattr(sys.modules[__name__], function_name)(context.user_data.get('price_per_sqm'), float(user_choice))
+            context.user_data['total_cost'] = result['total_cost']
+            await send_message(update, context, result['formatted_message'], ['В начало'])
+            context.user_data['state'] = 'main_menu'
+            return
+    elif user_choice in CLEANING_PRICES and user_state == 'calculator_menu':
         context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
         next_state = 'enter_square_meters'
         context.user_data['state'] = next_state
-        await send_message(update, context, MENU_TREE['calculator_menu']['list']['enter_square_meters']['message'],
-                           MENU_TREE['calculator_menu']['list']['enter_square_meters']['options'])
+        await send_message(update, context, MENU_TREE[next_state]['message'], MENU_TREE[next_state]['options'])
     elif user_choice in menu['next_state']:
         next_state = menu['next_state'][user_choice]
         context.user_data['state'] = next_state
 
-        next_menu = MENU_TREE['calculator_menu']['list'].get(next_state) or MENU_TREE.get(next_state)
+        next_menu = MENU_TREE.get(next_state)
         if next_menu:
             await send_message(update, context, next_menu['message'], next_menu['options'])
     else:
         await send_message(update, context, menu['fallback'], menu['options'])
-
 
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data['state'] = 'main_menu'
     menu = MENU_TREE['main_menu']
     await send_message(update, context, menu['message'], menu['options'])
-
 
 # Основная функция, которая отвечает за запуск бота
 def main():
@@ -202,7 +172,6 @@ def main():
 
     # Запускаем бота
     application.run_polling()
-
 
 if __name__ == '__main__':
     main()
