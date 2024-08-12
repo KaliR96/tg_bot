@@ -35,18 +35,16 @@ MENU_TREE = {
         'message': 'Выберите тип уборки:',
         'options': ['Ген.уборка', 'Повседневная', 'Послестрой', 'Мытье окон', 'В начало'],
         'next_state': {
-            'Ген.уборка': 'calculate_cost',
-            'Повседневная': 'calculate_cost',
-            'Послестрой': 'calculate_cost',
-            'Мытье окон': 'calculate_cost',
+            'Ген.уборка': 'enter_square_meters',
+            'Повседневная': 'enter_square_meters',
+            'Послестрой': 'enter_square_meters',
+            'Мытье окон': 'enter_square_meters',
             'В начало': 'main_menu'
-        }
-    },
-    'back_to_main': {
-        'message': 'В начало',
-        'options': ['В начало'],
-        'next_state': {
-            'В начало': 'main_menu'
+        },
+        'enter_square_meters': {
+            'message': 'Введите количество квадратных метров:',
+            'options': ['В начало'],
+            'calculate': True  # Это специальный ключ для обработки калькуляции
         }
     }
 }
@@ -67,31 +65,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     menu = MENU_TREE.get(user_state)
     user_choice = update.message.text
 
-    # Проверка, если выбранная опция ведет на следующий уровень
-    if user_choice in menu['next_state']:
-        next_state = menu['next_state'][user_choice]
-        context.user_data['state'] = next_state
-
-        # Переход на следующий уровень меню
-        next_menu = MENU_TREE.get(next_state)
-        if next_menu:
-            await send_message(update, context, next_menu['message'], next_menu['options'])
-        elif next_state == 'calculate_cost':
-            # Обработка калькулятора отдельно, так как требуется ввод данных
-            context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
-            await send_message(update, context, f'Вы выбрали {user_choice}. Введите количество квадратных метров:', ['В начало'])
+    # Если пользователь находится в calculator_menu
+    if user_state == 'calculator_menu' and user_choice in CLEANING_PRICES:
+        context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
+        next_menu = menu['enter_square_meters']
+        context.user_data['state'] = 'calculator_menu_enter_square_meters'
+        await send_message(update, context, next_menu['message'], next_menu['options'])
+    elif user_state == 'calculator_menu_enter_square_meters':
+        try:
+            sqm = float(user_choice)
+            price_per_sqm = context.user_data.get('price_per_sqm')
+            total_cost = price_per_sqm * sqm
+            await send_message(update, context, f'Стоимость уборки: {total_cost:.2f} руб.', ['В начало'])
+            context.user_data['state'] = 'main_menu'
+        except ValueError:
+            await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.',
+                               ['В начало'])
     else:
-        # Обработка ввода квадратных метров для расчета стоимости
-        if user_state == 'calculate_cost':
-            try:
-                sqm = float(user_choice)
-                price_per_sqm = context.user_data.get('price_per_sqm')
-                total_cost = price_per_sqm * sqm
-                await send_message(update, context, f'Стоимость уборки: {total_cost:.2f} руб.', ['В начало'])
-                context.user_data['state'] = 'main_menu'
-            except ValueError:
-                await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.',
-                                   ['В начало'])
+        # Проверка, если выбранная опция ведет на следующий уровень
+        if user_choice in menu['next_state']:
+            next_state = menu['next_state'][user_choice]
+            context.user_data['state'] = next_state
+
+            # Переход на следующий уровень меню
+            next_menu = MENU_TREE.get(next_state)
+            if next_menu:
+                await send_message(update, context, next_menu['message'], next_menu['options'])
         else:
             # Если выбрана некорректная опция
             await send_message(update, context, 'Пожалуйста, выберите опцию из меню.', menu['options'])
