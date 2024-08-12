@@ -61,10 +61,21 @@ MENU_TREE = {
                 'list': {
                     'calculate_result': {
                         'message': 'Стоимость уборки: {total_cost:.2f} руб.',
-                        'options': ['В начало'],
+                        'options': ['В начало', 'Заказать клининг'],
                         'run': 'calculate',
                         'next_state': {
-                            'В начало': 'main_menu'
+                            'В начало': 'main_menu',
+                            'Заказать клининг': 'order_cleaning_now'
+                        },
+                        'list': {
+                            'order_cleaning_now': {
+                                'message': 'Заявка отправлена! Ожидайте звонка от нашего менеджера.',
+                                'options': ['В начало'],
+                                'run': 'order_cleaning_now_func',
+                                'next_state': {
+                                    'В начало': 'main_menu'
+                                }
+                            }
                         }
                     }
                 }
@@ -87,14 +98,6 @@ MENU_TREE = {
             'В начало': 'main_menu'
         },
         'fallback': 'Пожалуйста, выберите опцию из меню.'
-    },
-    'order_cleaning_now': {
-        'message': 'Заявка отправлена! Ожидайте звонка от нашего менеджера.',
-        'options': ['В начало'],
-        'run': 'order_cleaning_now_func',
-        'next_state': {
-            'В начало': 'main_menu'
-        }
     }
 }
 
