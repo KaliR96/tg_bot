@@ -1,0 +1,10 @@
+# Игнорирование служебных файлов PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
