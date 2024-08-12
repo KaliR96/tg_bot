@@ -51,11 +51,13 @@ MENU_TREE = {
     }
 }
 
+
 # Функция для отправки сообщения с заданной клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
     reply_markup = ReplyKeyboardMarkup([options], resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(message, reply_markup=reply_markup)
     logger.info("Отправлено сообщение: %s", message)
+
 
 # Функция обработки переходов между состояниями
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -88,16 +90,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await send_message(update, context, f'Стоимость уборки: {total_cost:.2f} руб.', ['В начало'])
                 context.user_data['state'] = 'main_menu'
             except ValueError:
-                await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.', ['В начало'])
+                await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.',
+                                   ['В начало'])
         else:
             # Если выбрана некорректная опция
             await send_message(update, context, 'Пожалуйста, выберите опцию из меню.', menu['options'])
 
-# Функция для запуска бота
+
+# Функция для обработки команды /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data['state'] = 'main_menu'
+    menu = MENU_TREE['main_menu']
+    await send_message(update, context, menu['message'], menu['options'])
+
+
+# Основная функция, которая отвечает за запуск бота
 def main():
     logger.info("Запуск бота")
+
     # Ваш токен
-    TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+    TOKEN = '7363733923:AAHKPw_fvjG2F3PBE2XP6Sj49u04uy7wpZE'
 
     # Создаем объект Application и передаем ему токен
     application = Application.builder().token(TOKEN).build()
@@ -111,11 +123,6 @@ def main():
     # Запускаем бота
     application.run_polling()
 
-# Функция для обработки команды /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    context.user_data['state'] = 'main_menu'
-    menu = MENU_TREE['main_menu']
-    await send_message(update, context, menu['message'], menu['options'])
 
 if __name__ == '__main__':
     main()
