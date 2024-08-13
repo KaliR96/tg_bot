@@ -20,7 +20,7 @@ CLEANING_PRICES = {
 }
 
 # Определение дерева меню
-MENU_TREE = {
+MMENU_TREE = {
     'main_menu': {
         'message': 'Привет!\nЯ Вера, твоя фея чистоты.\nМой робот-уборщик поможет:\n- рассчитать стоимость уборки\n- прислать клининг на дом\n- связаться со мной.',
         'options': ['Тарифы', 'Калькулятор', 'Заказать клининг', 'Связаться'],
@@ -49,37 +49,34 @@ MENU_TREE = {
             'Мытье окон': 'enter_square_meters',
             'В начало': 'main_menu'
         },
-        'fallback': 'Пожалуйста, выберите тип уборки из списка.',
-        'list': {
-            'enter_square_meters': {
-                'message': 'Введите количество квадратных метров:',
-                'options': ['В начало'],
-                'next_state': {
-                    'calculate_result': 'calculate_result'
-                },
-                'fallback': 'Пожалуйста, введите корректное количество квадратных метров.',
-                'list': {
-                    'calculate_result': {
-                        'message': 'Стоимость уборки: {total_cost:.2f} руб.',
-                        'options': ['В начало', 'Заказать клининг'],
-                        'run': 'calculate',
-                        'next_state': {
-                            'В начало': 'main_menu',
-                            'Заказать клининг': 'order_cleaning_now'
-                        },
-                        'list': {
-                            'order_cleaning_now': {
-                                'message': 'Заявка отправлена! Ожидайте звонка от нашего менеджера.',
-                                'options': ['В начало'],
-                                'run': 'order_cleaning_now_func',
-                                'next_state': {
-                                    'В начало': 'main_menu'
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        'fallback': 'Пожалуйста, выберите тип уборки из списка.'
+    },
+    'enter_square_meters': {
+        'message': 'Введите количество квадратных метров:',
+        'options': ['В начало'],
+        'next_state': {
+            'calculate_result': 'calculate_result'
+        },
+        'fallback': 'Пожалуйста, введите корректное количество квадратных метров.'
+    },
+    'calculate_result': {
+        'message': 'Стоимость уборки: {total_cost:.2f} руб.',
+        'options': ['В начало', 'Заказать клининг'],
+        'run': 'calculate_total_cost',
+        'next_state': {
+            'В начало': 'main_menu',
+            'Заказать клининг': 'order_cleaning_now'
+        },
+        'calculate_total_cost': {
+            'function': lambda square_meters, rate: max(square_meters * rate, 1500)
+        }
+    },
+    'order_cleaning_now': {
+        'message': 'Заявка отправлена! Ожидайте звонка от нашего менеджера.',
+        'options': ['В начало'],
+        'run': 'order_cleaning_now_func',
+        'next_state': {
+            'В начало': 'main_menu'
         }
     },
     'order_cleaning': {
@@ -99,7 +96,28 @@ MENU_TREE = {
         },
         'fallback': 'Пожалуйста, выберите опцию из меню.'
     }
-}
+}  # Закрывающая скобка для всего дерева MENU_TREE
+
+# Дублирующийся код ниже был удален
+
+'order_cleaning': {
+        'message': 'Для заказа клининга нажмите "Заказать сейчас" или свяжитесь с нами по телефону +7 (123) 456-78-90.',
+        'options': ['Заказать сейчас', 'В начало'],
+        'next_state': {
+            'Заказать сейчас': 'order_cleaning_now',
+            'В начало': 'main_menu'
+        },
+        'fallback': 'Пожалуйста, выберите опцию из меню.'
+    },
+    'contact': {
+        'message': 'Связаться с нами вы можете по телефону +7 (123) 456-78-90 или через email: clean@example.com.',
+        'options': ['В начало'],
+        'next_state': {
+            'В начало': 'main_menu'
+        },
+        'fallback': 'Пожалуйста, выберите опцию из меню.'
+    }
+
 
 # Функция для отправки сообщения с заданной клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
