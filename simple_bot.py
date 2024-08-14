@@ -22,19 +22,19 @@ CLEANING_PRICES = {
 # Пути к изображениям и текст для каждого тарифа
 CLEANING_DETAILS = {
     'Ген.уборка': {
-        'image_path': r'C:\Users\travo\Desktop\tg_bot\генералка.jpg',
+        'image_path': 'C:\\Users\\travo\\Desktop\\tg_bot\\генералка.jpg',  # Укажите путь к изображению для Генеральной уборки
         'details_text': 'Генеральная уборка включает в себя полную уборку всей квартиры: удаление пыли, чистка полов, влажная уборка всех поверхностей и т.д.'
     },
     'Повседневная': {
-        'image_path': r'C:\Users\travo\Desktop\tg_bot\повседневка.jpg',
+        'image_path': 'C:\\Users\\travo\\Desktop\\tg_bot\\повседневка.jpg',  # Укажите путь к изображению для Повседневной уборки
         'details_text': 'Повседневная уборка включает поддержание чистоты: протирка пыли, мытье полов, уборка на кухне и в санузле.'
     },
     'Послестрой': {
-        'image_path': r'C:\Users\travo\Desktop\tg_bot\послестрой.jpg',
+        'image_path': 'C:\\Users\\travo\\Desktop\\tg_bot\\послестрой.jpg',  # Укажите путь к изображению для уборки после ремонта
         'details_text': 'Уборка после ремонта включает удаление строительной пыли, очистку окон и дверей, удаление следов краски и т.д.'
     },
     'Мытье окон': {
-        'image_path': r'C:\Users\travo\Desktop\tg_bot\окна.jpg',
+        'image_path': 'C:\\Users\\travo\\Desktop\\tg_bot\\окна.jpg',  # Укажите путь к изображению для мытья окон
         'details_text': 'Мытье окон включает очистку стекол снаружи и изнутри, а также протирку рам и подоконников.'
     }
 }
@@ -49,7 +49,8 @@ MENU_TREE = {
             'Калькулятор': 'calculator_menu',
             'Заказать клининг': 'order_cleaning',
             'Связаться': 'contact'
-        }
+        },
+        'fallback': 'Пожалуйста, выберите опцию из меню.'
     },
     'show_tariffs': {
         'message': 'Выберите тариф для получения подробностей:',
@@ -71,16 +72,19 @@ MENU_TREE = {
             'Послестрой': 'enter_square_meters',
             'Мытье окон': 'enter_square_meters',
             'В начало': 'main_menu'
-        }
+        },
+        'fallback': 'Пожалуйста, выберите тип уборки из списка.'
     },
     'enter_square_meters': {
         'message': 'Введите количество квадратных метров:',
         'options': ['В начало'],
         'next_state': {
             'calculate_result': 'calculate_result'
-        }
+        },
+        'fallback': 'Пожалуйста, введите корректное количество квадратных метров.'
     },
     'calculate_result': {
+        'message': '',  # Мы будем динамически формировать сообщение
         'options': ['В начало', 'Заказать клининг'],
         'next_state': {
             'В начало': 'main_menu',
@@ -90,6 +94,7 @@ MENU_TREE = {
     'order_cleaning_now': {
         'message': 'Заявка отправлена! Ожидайте звонка от нашего менеджера.',
         'options': ['В начало'],
+        'run': 'order_cleaning_now_func',
         'next_state': {
             'В начало': 'main_menu'
         }
@@ -100,14 +105,16 @@ MENU_TREE = {
         'next_state': {
             'Заказать сейчас': 'order_cleaning_now',
             'В начало': 'main_menu'
-        }
+        },
+        'fallback': 'Пожалуйста, выберите опцию из меню.'
     },
     'contact': {
         'message': 'Связаться с нами вы можете по телефону +7 (123) 456-78-90 или через email: clean@example.com.',
         'options': ['В начало'],
         'next_state': {
             'В начало': 'main_menu'
-        }
+        },
+        'fallback': 'Пожалуйста, выберите опцию из меню.'
     }
 }
 
@@ -128,70 +135,6 @@ async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, messa
     await update.message.reply_text(message, reply_markup=reply_markup)
     logger.info("Отправлено сообщение: %s", message)
 
-# Универсальная функция для обработки переходов между состояниями
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_state = context.user_data.get('state', 'main_menu')
-    logger.info("Текущее состояние: %s", user_state)
-
-    menu = MENU_TREE.get(user_state)
-    user_choice = update.message.text
-
-    # Переход в главное меню
-    if user_choice == 'В начало':
-        context.user_data['state'] = 'main_menu'
-        menu = MENU_TREE['main_menu']
-        await send_message(update, context, menu['message'], menu['options'])
-        return
-
-    # Обработка выбора тарифа в меню "Тарифы"
-    if user_state == 'show_tariffs' and user_choice in CLEANING_PRICES:
-        details = CLEANING_DETAILS.get(user_choice)
-        if details:
-            try:
-                # Отправляем изображение
-                with open(details['image_path'], 'rb') as image_file:
-                    await update.message.reply_photo(photo=image_file)
-            except FileNotFoundError:
-                logger.error(f"Изображение не найдено: {details['image_path']}")
-                await update.message.reply_text("Изображение для этого тарифа временно недоступно.")
-            # Отправляем текст
-            await send_message(update, context, details['details_text'], ['В начало'])
-        return
-
-    # Обработка выбора типа уборки в калькуляторе
-    if user_state == 'calculator_menu' and user_choice in CLEANING_PRICES:
-        context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]  # Сохранение цены в контексте
-        context.user_data['state'] = 'enter_square_meters'
-        await send_message(update, context, MENU_TREE['enter_square_meters']['message'], MENU_TREE['enter_square_meters']['options'])
-        return
-
-    # Обработка ввода квадратных метров
-    if user_state == 'enter_square_meters':
-        try:
-            sqm = float(user_choice)
-            price_per_sqm = context.user_data.get('price_per_sqm')
-            if price_per_sqm is None:
-                await send_message(update, context, 'Произошла ошибка. Пожалуйста, вернитесь в главное меню и начните заново.', ['В начало'])
-                context.user_data['state'] = 'main_menu'
-                return
-
-            result = calculate(price_per_sqm, sqm)
-            await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
-            context.user_data['state'] = 'main_menu'
-        except ValueError:
-            await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.', menu['options'])
-        return
-
-    # Переходы между остальными состояниями
-    if user_choice in menu['next_state']:
-        next_state = menu['next_state'][user_choice]
-        context.user_data['state'] = next_state
-        next_menu = MENU_TREE.get(next_state)
-        if next_menu:
-            await send_message(update, context, next_menu['message'], next_menu['options'])
-    else:
-        await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'), menu['options'])
-
 # Функция для расчета стоимости уборки
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
@@ -201,11 +144,51 @@ def calculate(price_per_sqm, sqm):
         'formatted_message': formatted_message
     }
 
+# Функция для обработки заявки на клининг
+async def order_cleaning_now_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Логика отправки сообщения владельцу бота
+    await send_message(update, context, 'Ваша заявка принята и обрабатывается. Ожидайте!', ['В начало'])
+    context.user_data['state'] = 'main_menu'
+
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data['state'] = 'main_menu'
     menu = MENU_TREE['main_menu']
     await send_message(update, context, menu['message'], menu['options'])
+
+# Универсальная функция для обработки переходов между состояниями
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_state = context.user_data.get('state', 'main_menu')
+    logger.info("Текущее состояние: %s", user_state)
+
+    menu = MENU_TREE.get(user_state)
+    user_choice = update.message.text
+
+    if user_state == 'enter_square_meters':
+        try:
+            sqm = float(user_choice)  # Преобразуем ввод в число
+            context.user_data['sqm'] = sqm
+            result = calculate(context.user_data['price_per_sqm'], sqm)
+            context.user_data['total_cost'] = result['total_cost']
+            await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
+            context.user_data['state'] = 'main_menu'
+        except ValueError:
+            await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.', menu['options'])
+    elif user_choice in CLEANING_PRICES and user_state == 'calculator_menu':
+        context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
+        next_state = 'enter_square_meters'
+        context.user_data['state'] = next_state
+        await send_message(update, context, MENU_TREE[next_state]['message'], MENU_TREE[next_state]['options'])
+    elif user_choice in menu['next_state']:
+        next_state = menu['next_state'][user_choice]
+        context.user_data['state'] = next_state
+
+        next_menu = MENU_TREE.get(next_state)
+        if next_menu:
+            await send_message(update, context, next_menu['message'], next_menu['options'])
+    else:
+        await send_message(update, context, menu['fallback'], menu['options'])
+
 
 # Основная функция для запуска бота
 def main():
