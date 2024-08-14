@@ -116,7 +116,7 @@ for tariff_name, details in CLEANING_DETAILS.items():
     MENU_TREE[f'detail_{tariff_name}'] = {
         'message': details['details_text'],
         'image_path': details['image_path'],
-        'options': ['Калькулятор', 'В начало'],  # Добавлена кнопка "Калькулятор"
+        'options': ['Калькулятор', 'В начало'],
         'next_state': {
             'Калькулятор': 'calculator_menu',  # Переход в калькулятор
             'В начало': 'main_menu'
@@ -155,8 +155,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             except FileNotFoundError:
                 logger.error(f"Изображение не найдено: {details['image_path']}")
                 await update.message.reply_text("Изображение для этого тарифа временно недоступно.")
+            # Сохраняем выбранный тариф для дальнейшего использования в калькуляторе
+            context.user_data['selected_tariff'] = user_choice
+            # Переключаем состояние на меню калькулятора
+            context.user_data['state'] = f'detail_{user_choice}'
             # Отправляем текст и показываем кнопки "Калькулятор" и "В начало"
             await send_message(update, context, details['details_text'], MENU_TREE[f'detail_{user_choice}']['options'])
+        return
+
+    # Обработка перехода в калькулятор после выбора тарифа
+    if user_state.startswith('detail_') and user_choice == 'Калькулятор':
+        tariff_name = user_state.split('_')[1]
+        context.user_data['price_per_sqm'] = CLEANING_PRICES[tariff_name]
+        context.user_data['state'] = 'enter_square_meters'
+        await send_message(update, context, MENU_TREE['enter_square_meters']['message'], MENU_TREE['enter_square_meters']['options'])
         return
 
     # Обработка выбора типа уборки в калькуляторе
@@ -201,6 +213,12 @@ def calculate(price_per_sqm, sqm):
         'total_cost': total_cost,
         'formatted_message': formatted_message
     }
+
+# Функция для обработки заявки на клининг
+async def order_cleaning_now_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Логика отправки сообщения владельцу бота
+    await send_message(update, context, 'Ваша заявка принята и обрабатывается. Ожидайте!', ['В начало'])
+    context.user_data['state'] = 'main_menu'
 
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
