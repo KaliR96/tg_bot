@@ -22,19 +22,19 @@ CLEANING_PRICES = {
 # Пути к изображениям и текст для каждого тарифа
 CLEANING_DETAILS = {
     'Ген.уборка': {
-        'image_path': 'path_to_general_cleaning_image.jpg',  # Укажите путь к изображению для Генеральной уборки
+        'image_path': 'C:\\Users\\travo\\Desktop\\tg_bot\\генералка.jpg',  # Укажите путь к изображению для Генеральной уборки
         'details_text': 'Генеральная уборка включает в себя полную уборку всей квартиры: удаление пыли, чистка полов, влажная уборка всех поверхностей и т.д.'
     },
     'Повседневная': {
-        'image_path': 'path_to_daily_cleaning_image.jpg',  # Укажите путь к изображению для Повседневной уборки
+        'image_path': 'C:\\Users\\travo\\Desktop\\tg_bot\\повседневка.jpg',  # Укажите путь к изображению для Повседневной уборки
         'details_text': 'Повседневная уборка включает поддержание чистоты: протирка пыли, мытье полов, уборка на кухне и в санузле.'
     },
     'Послестрой': {
-        'image_path': 'path_to_post_construction_cleaning_image.jpg',  # Укажите путь к изображению для уборки после ремонта
+        'image_path': 'C:\\Users\\travo\\Desktop\\tg_bot\\послестрой.jpg',  # Укажите путь к изображению для уборки после ремонта
         'details_text': 'Уборка после ремонта включает удаление строительной пыли, очистку окон и дверей, удаление следов краски и т.д.'
     },
     'Мытье окон': {
-        'image_path': 'path_to_window_cleaning_image.jpg',  # Укажите путь к изображению для мытья окон
+        'image_path': 'C:\\Users\\travo\\Desktop\\tg_bot\\окна.jpg',  # Укажите путь к изображению для мытья окон
         'details_text': 'Мытье окон включает очистку стекол снаружи и изнутри, а также протирку рам и подоконников.'
     }
 }
@@ -164,15 +164,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     menu = MENU_TREE.get(user_state)
     user_choice = update.message.text
 
-    if user_state in [f'detail_{name}' for name in CLEANING_PRICES.keys()]:
-        details = CLEANING_DETAILS.get(user_state.split('_')[1])
-        if details:
-            # Отправляем изображение
-            with open(details['image_path'], 'rb') as image_file:
-                await update.message.reply_photo(photo=image_file)
-            # Отправляем текст
-            await send_message(update, context, details['details_text'], ['В начало'])
-        context.user_data['state'] = 'main_menu'
+    if user_state == 'enter_square_meters':
+        try:
+            sqm = float(user_choice)  # Преобразуем ввод в число
+            context.user_data['sqm'] = sqm
+            result = calculate(context.user_data['price_per_sqm'], sqm)
+            context.user_data['total_cost'] = result['total_cost']
+            await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
+            context.user_data['state'] = 'main_menu'
+        except ValueError:
+            await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.', menu['options'])
+    elif user_choice in CLEANING_PRICES and user_state == 'calculator_menu':
+        context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
+        next_state = 'enter_square_meters'
+        context.user_data['state'] = next_state
+        await send_message(update, context, MENU_TREE[next_state]['message'], MENU_TREE[next_state]['options'])
     elif user_choice in menu['next_state']:
         next_state = menu['next_state'][user_choice]
         context.user_data['state'] = next_state
@@ -182,6 +188,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await send_message(update, context, next_menu['message'], next_menu['options'])
     else:
         await send_message(update, context, menu['fallback'], menu['options'])
+
 
 # Основная функция для запуска бота
 def main():
