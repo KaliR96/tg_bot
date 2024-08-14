@@ -22,19 +22,19 @@ CLEANING_PRICES = {
 # Пути к изображениям и текст для каждого тарифа
 CLEANING_DETAILS = {
     'Ген.уборка': {
-        'image_path': 'path_to_general_cleaning_image.jpg',
+        'image_path': 'path_to_general_cleaning_image.jpg',  # Укажите путь к изображению для Генеральной уборки
         'details_text': 'Генеральная уборка включает в себя полную уборку всей квартиры: удаление пыли, чистка полов, влажная уборка всех поверхностей и т.д.'
     },
     'Повседневная': {
-        'image_path': 'path_to_daily_cleaning_image.jpg',
+        'image_path': 'path_to_daily_cleaning_image.jpg',  # Укажите путь к изображению для Повседневной уборки
         'details_text': 'Повседневная уборка включает поддержание чистоты: протирка пыли, мытье полов, уборка на кухне и в санузле.'
     },
     'Послестрой': {
-        'image_path': 'path_to_post_construction_cleaning_image.jpg',
+        'image_path': 'path_to_post_construction_cleaning_image.jpg',  # Укажите путь к изображению для уборки после ремонта
         'details_text': 'Уборка после ремонта включает удаление строительной пыли, очистку окон и дверей, удаление следов краски и т.д.'
     },
     'Мытье окон': {
-        'image_path': 'path_to_window_cleaning_image.jpg',
+        'image_path': 'path_to_window_cleaning_image.jpg',  # Укажите путь к изображению для мытья окон
         'details_text': 'Мытье окон включает очистку стекол снаружи и изнутри, а также протирку рам и подоконников.'
     }
 }
@@ -188,7 +188,7 @@ def main():
     logger.info("Запуск бота")
 
     # Ваш токен
-    TOKEN = 'YOUR_BOT_TOKEN_HERE'
+    TOKEN = '7363733923:AAHKPw_fvjG2F3PBE2XP6Sj49u04uy7wpZE'  # Вставьте ваш токен сюда
 
     # Создаем объект Application и передаем ему токен
     application = Application.builder().token(TOKEN).build()
