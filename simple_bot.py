@@ -2,7 +2,6 @@
 import logging
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import sys
 
 # Настраиваем логирование
 logging.basicConfig(
@@ -20,10 +19,30 @@ CLEANING_PRICES = {
     'Мытье окон': 100
 }
 
+# Пути к изображениям и текст для каждого тарифа
+CLEANING_DETAILS = {
+    'Ген.уборка': {
+        'image_path': 'path_to_general_cleaning_image.jpg',
+        'details_text': 'Генеральная уборка включает в себя полную уборку всей квартиры: удаление пыли, чистка полов, влажная уборка всех поверхностей и т.д.'
+    },
+    'Повседневная': {
+        'image_path': 'path_to_daily_cleaning_image.jpg',
+        'details_text': 'Повседневная уборка включает поддержание чистоты: протирка пыли, мытье полов, уборка на кухне и в санузле.'
+    },
+    'Послестрой': {
+        'image_path': 'path_to_post_construction_cleaning_image.jpg',
+        'details_text': 'Уборка после ремонта включает удаление строительной пыли, очистку окон и дверей, удаление следов краски и т.д.'
+    },
+    'Мытье окон': {
+        'image_path': 'path_to_window_cleaning_image.jpg',
+        'details_text': 'Мытье окон включает очистку стекол снаружи и изнутри, а также протирку рам и подоконников.'
+    }
+}
+
 # Определение дерева меню
 MENU_TREE = {
     'main_menu': {
-        'message': 'Привет!\nЯ Вера, твоя фея чистоты.\nМой робот-уборщик поможет:\n- рассчитать стоимость уборки\n- прислать клининг на дом\n- связаться со мной.',
+        'message': 'Привет! Я Вера, твоя фея чистоты.\nМой робот-уборщик поможет:\n- рассчитать стоимость уборки\n- прислать клининг на дом\n- связаться со мной.',
         'options': ['Тарифы', 'Калькулятор', 'Заказать клининг', 'Связаться'],
         'next_state': {
             'Тарифы': 'show_tariffs',
@@ -34,9 +53,13 @@ MENU_TREE = {
         'fallback': 'Пожалуйста, выберите опцию из меню.'
     },
     'show_tariffs': {
-        'message': '\n'.join([f"{name}: {price} руб./кв.м" for name, price in CLEANING_PRICES.items()]),
-        'options': ['В начало'],
+        'message': 'Выберите тариф для получения подробностей:',
+        'options': ['Ген.уборка', 'Повседневная', 'Послестрой', 'Мытье окон', 'В начало'],
         'next_state': {
+            'Ген.уборка': 'detail_Ген.уборка',
+            'Повседневная': 'detail_Повседневная',
+            'Послестрой': 'detail_Послестрой',
+            'Мытье окон': 'detail_Мытье окон',
             'В начало': 'main_menu'
         }
     },
@@ -95,6 +118,17 @@ MENU_TREE = {
     }
 }
 
+# Динамическое добавление состояний для каждого тарифа
+for tariff_name, details in CLEANING_DETAILS.items():
+    MENU_TREE[f'detail_{tariff_name}'] = {
+        'message': details['details_text'],
+        'image_path': details['image_path'],
+        'options': ['В начало'],
+        'next_state': {
+            'В начало': 'main_menu'
+        }
+    }
+
 # Функция для отправки сообщения с заданной клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
     reply_markup = ReplyKeyboardMarkup([options], resize_keyboard=True, one_time_keyboard=True)
@@ -130,22 +164,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     menu = MENU_TREE.get(user_state)
     user_choice = update.message.text
 
-    if user_state == 'enter_square_meters':
-        # Обработка ввода квадратных метров
-        try:
-            sqm = float(user_choice)  # Попытка преобразовать ввод в число
-            context.user_data['sqm'] = sqm  # Сохранение данных
-            result = calculate(context.user_data['price_per_sqm'], sqm)
-            context.user_data['total_cost'] = result['total_cost']
-            await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
-            context.user_data['state'] = 'main_menu'
-        except ValueError:
-            await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.', menu['options'])
-    elif user_choice in CLEANING_PRICES and user_state == 'calculator_menu':
-        context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
-        next_state = 'enter_square_meters'
-        context.user_data['state'] = next_state
-        await send_message(update, context, MENU_TREE[next_state]['message'], MENU_TREE[next_state]['options'])
+    if user_state in [f'detail_{name}' for name in CLEANING_PRICES.keys()]:
+        details = CLEANING_DETAILS.get(user_state.split('_')[1])
+        if details:
+            # Отправляем изображение
+            with open(details['image_path'], 'rb') as image_file:
+                await update.message.reply_photo(photo=image_file)
+            # Отправляем текст
+            await send_message(update, context, details['details_text'], ['В начало'])
+        context.user_data['state'] = 'main_menu'
     elif user_choice in menu['next_state']:
         next_state = menu['next_state'][user_choice]
         context.user_data['state'] = next_state
@@ -161,7 +188,7 @@ def main():
     logger.info("Запуск бота")
 
     # Ваш токен
-    TOKEN = '7363733923:AAHKPw_fvjG2F3PBE2XP6Sj49u04uy7wpZE'
+    TOKEN = 'YOUR_BOT_TOKEN_HERE'
 
     # Создаем объект Application и передаем ему токен
     application = Application.builder().token(TOKEN).build()
