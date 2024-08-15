@@ -189,13 +189,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             else:
                 await send_message(update, context, 'Пожалуйста, выберите опцию из меню.', MENU_TREE['admin_menu']['options'])
                 return
-                # Обработка модерации отзывов
+        # Обработка модерации отзывов
         if user_state == 'moderation_menu':
-            reviews = context.application_data.get('reviews', [])
+            reviews = context.application.bot_data.get('reviews', [])
 
             if not reviews:
                 await send_message(update, context, "Нет отзывов для модерации.",
-                                    MENU_TREE['admin_menu']['options'])
+                                   MENU_TREE['admin_menu']['options'])
                 return
 
             # Формируем список отзывов с отметкой, прошли они модерацию или нет
