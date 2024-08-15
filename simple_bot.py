@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # Настраиваем логирование
 logging.basicConfig(
@@ -103,7 +103,7 @@ MENU_TREE = {
         }
     },
     'contact': {
-        'message': 'Связаться с нами вы можете по телефону +7 (123) 456-78-90 или через email: clean@example.com.',
+        'message': 'Связаться с нами вы можете через следующие каналы:',
         'options': ['В начало'],
         'next_state': {
             'В начало': 'main_menu'
@@ -118,16 +118,22 @@ for tariff_name, details in CLEANING_DETAILS.items():
         'image_path': details['image_path'],
         'options': ['Калькулятор', 'В начало'],
         'next_state': {
-            'Калькулятор': 'calculator_menu',  # Переход в калькулятор
+            'Калькулятор': 'calculator_menu',
             'В начало': 'main_menu'
         }
     }
 
-# Функция для отправки сообщения с заданной клавиатурой
+# Функция для отправки сообщения с клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
     reply_markup = ReplyKeyboardMarkup([options], resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(message, reply_markup=reply_markup)
     logger.info("Отправлено сообщение: %s", message)
+
+# Функция для отправки сообщения с inline-кнопками
+async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, buttons: list) -> None:
+    keyboard = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text(message, reply_markup=keyboard)
+    logger.info("Отправлено сообщение с кнопками: %s", message)
 
 # Универсальная функция для обработки переходов между состояниями
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -171,13 +177,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await send_message(update, context, MENU_TREE['enter_square_meters']['message'], MENU_TREE['enter_square_meters']['options'])
         return
 
-    # Обработка выбора типа уборки в калькуляторе
-    if user_state == 'calculator_menu' and user_choice in CLEANING_PRICES:
-        context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]  # Сохранение цены в контексте
-        context.user_data['state'] = 'enter_square_meters'
-        await send_message(update, context, MENU_TREE['enter_square_meters']['message'], MENU_TREE['enter_square_meters']['options'])
-        return
-
     # Обработка ввода квадратных метров
     if user_state == 'enter_square_meters':
         try:
@@ -195,7 +194,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.', menu['options'])
         return
 
-    # Переходы между остальными состояниями
+    # Обработка перехода в меню "Связаться"
+    if user_state == 'main_menu' and user_choice == 'Связаться':
+        context.user_data['state'] = 'contact'
+        buttons = [
+            [InlineKeyboardButton("WhatsApp", url="https://wa.me/79956124581")],
+            [InlineKeyboardButton("Telegram", url="https://t.me/kaliroom")],
+            [InlineKeyboardButton("Показать номер", callback_data="show_phone_number")]
+        ]
+        await send_inline_message(update, context, MENU_TREE['contact']['message'], buttons)
+        return
+
+    # Обработка выбора в других состояниях
     if user_choice in menu['next_state']:
         next_state = menu['next_state'][user_choice]
         context.user_data['state'] = next_state
@@ -205,6 +215,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'), menu['options'])
 
+# Обработка нажатий на inline-кнопки
+async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if query.data == "show_phone_number":
+        await query.edit_message_text(text="📞 Телефон: +7 995 612 45 81")
+
 # Функция для расчета стоимости уборки
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
@@ -213,12 +230,6 @@ def calculate(price_per_sqm, sqm):
         'total_cost': total_cost,
         'formatted_message': formatted_message
     }
-
-# Функция для обработки заявки на клининг
-async def order_cleaning_now_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Логика отправки сообщения владельцу бота
-    await send_message(update, context, 'Ваша заявка принята и обрабатывается. Ожидайте!', ['В начало'])
-    context.user_data['state'] = 'main_menu'
 
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -241,6 +252,9 @@ def main():
 
     # Обработчик всех текстовых сообщений
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Обработчик нажатий на inline-кнопки
+    application.add_handler(CallbackQueryHandler(button_click))
 
     # Запускаем бота
     logger.info("Бот успешно запущен, начало polling...")
