@@ -42,12 +42,11 @@ CLEANING_DETAILS = {
 # Определение дерева меню
 MENU_TREE = {
     'main_menu': {
-        'message': 'Привет! Я Вера, твоя фея чистоты.\nМой робот-уборщик поможет:\n- рассчитать стоимость уборки\n- прислать клининг на дом\n- связаться со мной.',
-        'options': ['Тарифы', 'Калькулятор', 'Заказать клининг', 'Связаться'],
+        'message': 'Привет! Я Вера, твоя фея чистоты.\nМой робот-уборщик поможет:\n- рассчитать стоимость уборки\n- связаться со мной.',
+        'options': ['Тарифы', 'Калькулятор', 'Связаться'],
         'next_state': {
             'Тарифы': 'show_tariffs',
             'Калькулятор': 'calculator_menu',
-            'Заказать клининг': 'order_cleaning',
             'Связаться': 'contact'
         }
     },
@@ -81,25 +80,9 @@ MENU_TREE = {
         }
     },
     'calculate_result': {
-        'options': ['В начало', 'Заказать клининг'],
-        'next_state': {
-            'В начало': 'main_menu',
-            'Заказать клининг': 'order_cleaning_now'
-        }
-    },
-    'order_cleaning_now': {
-        'message': 'Заявка отправлена! Ожидайте звонка от нашего менеджера.',
         'options': ['В начало'],
         'next_state': {
-            'В начало': 'main_menu'
-        }
-    },
-    'order_cleaning': {
-        'message': 'Для заказа клининга нажмите "Заказать сейчас" или свяжитесь с нами по телефону +7 (123) 456-78-90.',
-        'options': ['Заказать сейчас', 'В начало'],
-        'next_state': {
-            'Заказать сейчас': 'order_cleaning_now',
-            'В начало': 'main_menu'
+            'В начало': 'main_menu',
         }
     },
     'contact': {
@@ -141,6 +124,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     logger.info("Текущее состояние: %s", user_state)
 
     menu = MENU_TREE.get(user_state)
+
+    if not menu:
+        await send_message(update, context, "Произошла ошибка. Пожалуйста, вернитесь в главное меню и начните заново.", ['В начало'])
+        context.user_data['state'] = 'main_menu'
+        return
+
     user_choice = update.message.text
 
     # Переход в главное меню
