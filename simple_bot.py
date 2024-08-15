@@ -196,6 +196,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         menu = MENU_TREE['main_menu']
         await send_message(update, context, menu['message'], menu['options'])
         return
+
+        # Обработка выбора тарифа в калькуляторе
+    if user_state == 'calculator_menu' and user_choice in CLEANING_PRICES:
+        # Сохраняем выбранный тариф
+        context.user_data['selected_tariff'] = user_choice
+        context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
+
+        # Переход к вводу квадратных метров
+        context.user_data['state'] = 'enter_square_meters'
+        await send_message(update, context, MENU_TREE['enter_square_meters']['message'],
+                           MENU_TREE['enter_square_meters']['options'])
+        return
     # Обработка выбора тарифа в меню "Тарифы"
     if user_state == 'show_tariffs' and user_choice in CLEANING_PRICES:
         details = CLEANING_DETAILS.get(user_choice)
@@ -243,15 +255,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Обработка перехода в меню "Связаться"
     if user_state == 'main_menu' and user_choice == 'Связаться':
         context.user_data['state'] = 'contact'
+
+        # Inline-кнопки для связи
         buttons = [
             [InlineKeyboardButton("WhatsApp", url="https://wa.me/79956124581")],
             [InlineKeyboardButton("Telegram", url="https://t.me/kaliroom")],
             [InlineKeyboardButton("Показать номер", callback_data="show_phone_number")]
         ]
         await send_inline_message(update, context, MENU_TREE['contact']['message'], buttons)
+
+        # Обычная кнопка "В начало" в ReplyKeyboardMarkup
+        reply_keyboard = [['В начало']]
+        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+        await update.message.reply_text("Вернуться в главное меню:", reply_markup=reply_markup)
         return
-
-
 
     if user_state == 'enter_square_meters':
         try:
