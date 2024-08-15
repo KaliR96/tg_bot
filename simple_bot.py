@@ -42,10 +42,9 @@ CLEANING_DETAILS = {
     }
 }
 
-# Определение дерева меню
 MENU_TREE = {
     'main_menu': {
-        'message': 'Привет! Я Вера, твоя фея чистоты.\nМой робот-уборщик поможет:\n- рассчитать стоимость уборки\n- связаться со мной.',
+        'message': 'Привет! Я Вера, твоя фея чистоты.\nМой робот-уборщик поможет:\n-познакомиться с видами уборки \n- рассчитать стоимость уборки\n- связаться со мной.',
         'options': ['Тарифы', 'Калькулятор', 'Связаться', 'Отзывы'],
         'next_state': {
             'Тарифы': 'show_tariffs',
@@ -64,34 +63,28 @@ MENU_TREE = {
     },
     'moderation_menu': {
         'message': 'Список оставленных отзывов:\n(Пример: тут можно подгрузить реальные отзывы)',
-        'options': ['В начало'],
+        'options': ['Одобрить отзыв', 'Удалить отзыв', 'В начало'],
         'next_state': {
+            'Одобрить отзыв': 'approve_review',
+            'Удалить отзыв': 'delete_review',
             'В начало': 'admin_menu'
         }
     },
-    'reviews_menu': {
-        'message': 'Что вы хотите сделать?',
-        'options': ['Написать отзыв', 'Посмотреть отзывы', 'В начало'],
-        'next_state': {
-            'Написать отзыв': 'write_review',
-            'Посмотреть отзывы': 'view_reviews',
-            'В начало': 'main_menu'
-        }
-    },
-    'write_review': {
-        'message': 'Пожалуйста, напишите ваш отзыв:',
+    'approve_review': {
+        'message': 'Введите номер отзыва, который вы хотите одобрить:',
         'options': ['В начало'],
         'next_state': {
-            'В начало': 'main_menu'
+            'В начало': 'moderation_menu'
         }
     },
-    'view_reviews': {
-        'message': 'Список отзывов:\n(Пример: тут можно подгрузить реальные отзывы)',
+    'delete_review': {
+        'message': 'Введите номер отзыва, который вы хотите удалить:',
         'options': ['В начало'],
         'next_state': {
-            'В начало': 'reviews_menu'
+            'В начало': 'moderation_menu'
         }
     },
+    # Другие состояния дерева меню...
     'show_tariffs': {
         'message': 'Выберите тариф для получения подробностей:',
         'options': ['Ген.уборка', 'Повседневная', 'Послестрой', 'Мытье окон', 'В начало'],
@@ -168,6 +161,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     logger.info("Текущее состояние: %s", user_state)
 
+    # Если пользователь не администратор, обрабатываем обычные состояния
+    menu = MENU_TREE.get(user_state)
+    user_choice = update.message.text  # Определение user_choice перемещено сюда
+
     # Проверяем, является ли пользователь администратором
     if user_id == ADMIN_ID:
         if user_state == 'main_menu':
@@ -184,20 +181,122 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     await send_message(update, context, next_menu['message'], next_menu['options'])
                 return
             else:
-                await send_message(update, context, 'Пожалуйста, выберите опцию из меню.', MENU_TREE['admin_menu']['options'])
+                await send_message(update, context, 'Пожалуйста, выберите опцию из меню.',
+                                   MENU_TREE['admin_menu']['options'])
                 return
 
-    # Если пользователь не администратор, обрабатываем обычные состояния
-    menu = MENU_TREE.get(user_state)
-    user_choice = update.message.text
+        # Обработка модерации отзывов
+        if user_state == 'moderation_menu':
+            reviews = context.application_data.get('reviews', [])
 
-    if user_choice == 'В начало':
+            if not reviews:
+                await send_message(update, context, "Нет отзывов для модерации.", MENU_TREE['admin_menu']['options'])
+                return
+
+            # Формируем список отзывов с отметкой, прошли они модерацию или нет
+            moderation_text = "\n".join(
+                [f"{i + 1}. {review['review']} - {'Одобрено' if review['approved'] else 'На рассмотрении'}" for
+                 i, review in enumerate(reviews)])
+
+            await send_message(update, context, f"Отзывы для модерации:\n\n{moderation_text}",
+                               MENU_TREE['moderation_menu']['options'])
+            return
+
+        # Обработка одобрения отзыва
+        if user_state == 'approve_review':
+            try:
+                review_index = int(update.message.text) - 1
+                reviews = context.application_data.get('reviews', [])
+
+                if 0 <= review_index < len(reviews):
+                    reviews[review_index]['approved'] = True
+                    await send_message(update, context, "Отзыв успешно одобрен.",
+                                       MENU_TREE['moderation_menu']['options'])
+                else:
+                    await send_message(update, context, "Некорректный номер отзыва. Попробуйте снова.",
+                                       MENU_TREE['approve_review']['options'])
+            except ValueError:
+                await send_message(update, context, "Пожалуйста, введите корректный номер.",
+                                   MENU_TREE['approve_review']['options'])
+
+            context.user_data['state'] = 'moderation_menu'
+            return
+
+        # Обработка удаления отзыва
+        if user_state == 'delete_review':
+            try:
+                review_index = int(update.message.text) - 1
+                reviews = context.application_data.get('reviews', [])
+
+                if 0 <= review_index < len(reviews):
+                    del reviews[review_index]
+                    await send_message(update, context, "Отзыв успешно удален.",
+                                       MENU_TREE['moderation_menu']['options'])
+                else:
+                    await send_message(update, context, "Некорректный номер отзыва. Попробуйте снова.",
+                                       MENU_TREE['delete_review']['options'])
+            except ValueError:
+                await send_message(update, context, "Пожалуйста, введите корректный номер.",
+                                   MENU_TREE['delete_review']['options'])
+
+            context.user_data['state'] = 'moderation_menu'
+            return
+
+    # Обработка написания отзыва
+    if user_state == 'write_review':
+        review = update.message.text.strip()
+
+        if review:
+            # Сохраняем отзыв
+            context.application_data['reviews'].append({
+                'review': review,
+                'approved': False  # Отметка о модерации
+            })
+            await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
+                               MENU_TREE['main_menu']['options'])
+        else:
+            await send_message(update, context, "Пожалуйста, введите текст отзыва.",
+                               MENU_TREE['write_review']['options'])
+
         context.user_data['state'] = 'main_menu'
-        menu = MENU_TREE['main_menu']
-        await send_message(update, context, menu['message'], menu['options'])
         return
 
-        # Обработка выбора тарифа в калькуляторе
+        # Если пользователь не администратор, обрабатываем обычные состояния
+        menu = MENU_TREE.get(user_state)
+
+        if menu is None:
+            logger.error(f"Меню для состояния '{user_state}' не найдено.")
+            await send_message(update, context, "Произошла ошибка. Пожалуйста, вернитесь в главное меню.", ['В начало'])
+            context.user_data['state'] = 'main_menu'
+            return
+
+        user_choice = update.message.text
+
+        # Обработка состояния "Отзывы"
+        if user_state == 'reviews_menu':
+            if user_choice in MENU_TREE['reviews_menu']['next_state']:
+                context.user_data['state'] = MENU_TREE['reviews_menu']['next_state'][user_choice]
+                next_menu = MENU_TREE.get(context.user_data['state'])
+                await send_message(update, context, next_menu['message'], next_menu['options'])
+            else:
+                await send_message(update, context, "Пожалуйста, выберите опцию из меню.",
+                                   MENU_TREE['reviews_menu']['options'])
+            return
+
+        if user_choice in menu['next_state']:
+            next_state = menu['next_state'][user_choice]
+            context.user_data['state'] = next_state
+
+            if next_state == 'enter_square_meters':
+                context.user_data['selected_tariff'] = user_choice  # Запоминаем выбранный тариф
+            next_menu = MENU_TREE.get(next_state)
+            if next_menu:
+                await send_message(update, context, next_menu['message'], next_menu['options'])
+        else:
+            await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'),
+                               menu['options'])
+
+    # Обработка выбора тарифа в калькуляторе
     if user_state == 'calculator_menu' and user_choice in CLEANING_PRICES:
         # Сохраняем выбранный тариф
         context.user_data['selected_tariff'] = user_choice
@@ -270,17 +369,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Вернуться в главное меню:", reply_markup=reply_markup)
         return
 
-    if user_state == 'enter_square_meters':
-        try:
-            square_meters = float(user_choice)
-            price_per_sqm = CLEANING_PRICES[context.user_data.get('selected_tariff', 'Повседневная')]
-            result = calculate(price_per_sqm, square_meters)
-            context.user_data['state'] = 'calculate_result'
-            await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
-        except ValueError:
-            await send_message(update, context, "Пожалуйста, введите число.", menu['options'])
-        return
-
     if user_choice in menu['next_state']:
         next_state = menu['next_state'][user_choice]
         context.user_data['state'] = next_state
@@ -292,6 +380,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await send_message(update, context, next_menu['message'], next_menu['options'])
     else:
         await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'), menu['options'])
+
 
 # Обработка нажатий на inline-кнопки
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -311,9 +400,13 @@ def calculate(price_per_sqm, sqm):
 
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Инициализация списка для хранения отзывов
+    context.application_data.setdefault('reviews', [])
+
     context.user_data['state'] = 'main_menu'
     menu = MENU_TREE['main_menu']
     await send_message(update, context, menu['message'], menu['options'])
+
 
 # Основная функция для запуска бота
 def main():
