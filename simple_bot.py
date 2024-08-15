@@ -391,11 +391,65 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'), menu['options'])
 
 # Обработка нажатий на inline-кнопки
+# ID вашего канала
+CHANNEL_ID = -1002249882445
+
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    if query.data == "show_phone_number":
+
+    # Обработка публикации отзыва
+    if query.data.startswith('publish_'):
+        review_index = int(query.data.split('_')[1])
+        reviews = context.application.bot_data.get('reviews', [])
+
+        if 0 <= review_index < len(reviews):
+            review = reviews[review_index]['review']
+            # Отправка сообщения на канал
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=review)
+            # Отметка о том, что отзыв опубликован
+            reviews[review_index]['approved'] = True
+            await query.edit_message_text(text="Отзыв успешно опубликован.")
+
+    # Обработка удаления отзыва
+    elif query.data.startswith('delete_'):
+        review_index = int(query.data.split('_')[1])
+        reviews = context.application.bot_data.get('reviews', [])
+
+        if 0 <= review_index < len(reviews):
+            del reviews[review_index]
+            await query.edit_message_text(text="Отзыв успешно удален.")
+
+    # Обработка показа номера телефона
+    elif query.data == "show_phone_number":
         await query.edit_message_text(text="📞 Телефон: +7 995 612 45 81")
+
+    # Получаем данные из callback_data
+    action, review_index = query.data.split('_')
+    review_index = int(review_index)
+
+    # Получаем список отзывов
+    reviews = context.application.bot_data.get('reviews', [])
+
+    # Убедимся, что индекс в пределах списка
+    if 0 <= review_index < len(reviews):
+        if action == 'publish':
+            # Отправляем отзыв в указанный канал или чат
+            channel_id = '@your_channel_username'  # Замените на ваш ID канала или чата
+            review_text = reviews[review_index]['review']
+            await context.bot.send_message(chat_id=channel_id, text=review_text)
+
+            # Отмечаем отзыв как одобренный
+            reviews[review_index]['approved'] = True
+            await query.edit_message_text(text="Отзыв опубликован.")
+
+        elif action == 'delete':
+            # Удаляем отзыв из списка
+            del reviews[review_index]
+            await query.edit_message_text(text="Отзыв удален.")
+    else:
+        await query.edit_message_text(text="Ошибка: отзыв не найден.")
+
 
 # Функция для расчета стоимости уборки
 def calculate(price_per_sqm, sqm):
