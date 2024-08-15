@@ -189,6 +189,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             else:
                 await send_message(update, context, 'Пожалуйста, выберите опцию из меню.', MENU_TREE['admin_menu']['options'])
                 return
+
         # Обработка модерации отзывов
         if user_state == 'moderation_menu':
             reviews = context.application.bot_data.get('reviews', [])
@@ -198,13 +199,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                    MENU_TREE['admin_menu']['options'])
                 return
 
-            # Формируем список отзывов с отметкой, прошли они модерацию или нет
-            moderation_text = "\n".join(
-                [f"{i + 1}. {review['review']} - {'Одобрено' if review['approved'] else 'На рассмотрении'}" for
-                    i, review in enumerate(reviews)])
+            # Отображаем каждый отзыв с инлайн-кнопками "Опубликовать" и "Удалить"
+            for i, review in enumerate(reviews):
+                review_text = f"{i + 1}. {review['review']} - {'Одобрено' if review.get('approved', False) else 'На рассмотрении'}"
+                buttons = [
+                    [
+                        InlineKeyboardButton("Опубликовать", callback_data=f'publish_{i}'),
+                        InlineKeyboardButton("Удалить", callback_data=f'delete_{i}')
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(buttons)
+                await update.message.reply_text(review_text, reply_markup=reply_markup)
 
-            await send_message(update, context, f"Отзывы для модерации:\n\n{moderation_text}",
-                                MENU_TREE['moderation_menu']['options'])
+            context.user_data['state'] = 'moderation_menu'
             return
 
         # Обработка одобрения отзыва
