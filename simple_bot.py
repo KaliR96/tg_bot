@@ -168,6 +168,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     logger.info("Текущее состояние: %s", user_state)
 
+    # Инициализация переменной user_choice
+    user_choice = update.message.text.strip()
+
     # Проверяем, является ли пользователь администратором
     if user_id == ADMIN_ID:
         if user_state == 'main_menu':
@@ -186,7 +189,94 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             else:
                 await send_message(update, context, 'Пожалуйста, выберите опцию из меню.', MENU_TREE['admin_menu']['options'])
                 return
+                # Обработка модерации отзывов
+        if user_state == 'moderation_menu':
+            reviews = context.application_data.get('reviews', [])
 
+            if not reviews:
+                await send_message(update, context, "Нет отзывов для модерации.",
+                                    MENU_TREE['admin_menu']['options'])
+                return
+
+            # Формируем список отзывов с отметкой, прошли они модерацию или нет
+            moderation_text = "\n".join(
+                [f"{i + 1}. {review['review']} - {'Одобрено' if review['approved'] else 'На рассмотрении'}" for
+                    i, review in enumerate(reviews)])
+
+            await send_message(update, context, f"Отзывы для модерации:\n\n{moderation_text}",
+                                MENU_TREE['moderation_menu']['options'])
+            return
+
+        # Обработка одобрения отзыва
+        if user_state == 'approve_review':
+            try:
+                review_index = int(user_choice) - 1
+                reviews = context.application_data.get('reviews', [])
+
+                if 0 <= review_index < len(reviews):
+                    reviews[review_index]['approved'] = True
+                    await send_message(update, context, "Отзыв успешно одобрен.",
+                                        MENU_TREE['moderation_menu']['options'])
+                else:
+                    await send_message(update, context, "Некорректный номер отзыва. Попробуйте снова.",
+                                        MENU_TREE['approve_review']['options'])
+            except ValueError:
+                await send_message(update, context, "Пожалуйста, введите корректный номер.",
+                                    MENU_TREE['approve_review']['options'])
+
+            context.user_data['state'] = 'moderation_menu'
+            return
+
+        # Обработка удаления отзыва
+        if user_state == 'delete_review':
+            try:
+                review_index = int(user_choice) - 1
+                reviews = context.application_data.get('reviews', [])
+
+                if 0 <= review_index < len(reviews):
+                    del reviews[review_index]
+                    await send_message(update, context, "Отзыв успешно удален.",
+                                        MENU_TREE['moderation_menu']['options'])
+                else:
+                    await send_message(update, context, "Некорректный номер отзыва. Попробуйте снова.",
+                                        MENU_TREE['delete_review']['options'])
+            except ValueError:
+                await send_message(update, context, "Пожалуйста, введите корректный номер.",
+                                    MENU_TREE['delete_review']['options'])
+
+            context.user_data['state'] = 'moderation_menu'
+            return
+
+    # Обработка написания отзыва
+    if user_state == 'write_review':
+        review = user_choice
+
+        if review:
+            # Сохраняем отзыв
+            context.application.bot_data.setdefault('reviews', []).append({
+                'review': review,
+                'approved': False  # Отметка о модерации
+            })
+            await send_message(update, context,
+                               "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
+                               MENU_TREE['main_menu']['options'])
+        else:
+            await send_message(update, context, "Пожалуйста, введите текст отзыва.",
+                               MENU_TREE['write_review']['options'])
+
+        context.user_data['state'] = 'main_menu'
+        return
+
+    # Обработка состояния "Отзывы"
+    if user_state == 'reviews_menu':
+        if user_choice in MENU_TREE['reviews_menu']['next_state']:
+            context.user_data['state'] = MENU_TREE['reviews_menu']['next_state'][user_choice]
+            next_menu = MENU_TREE.get(context.user_data['state'])
+            await send_message(update, context, next_menu['message'], next_menu['options'])
+        else:
+            await send_message(update, context, "Пожалуйста, выберите опцию из меню.",
+                                MENU_TREE['reviews_menu']['options'])
+        return
     # Если пользователь не администратор, обрабатываем обычные состояния
     menu = MENU_TREE.get(user_state)
     user_choice = update.message.text
