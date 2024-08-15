@@ -46,18 +46,50 @@ CLEANING_DETAILS = {
 MENU_TREE = {
     'main_menu': {
         'message': 'Привет! Я Вера, твоя фея чистоты.\nМой робот-уборщик поможет:\n- рассчитать стоимость уборки\n- связаться со мной.',
-        'options': ['Тарифы', 'Калькулятор', 'Связаться'],
+        'options': ['Тарифы', 'Калькулятор', 'Связаться', 'Отзывы'],
         'next_state': {
             'Тарифы': 'show_tariffs',
             'Калькулятор': 'calculator_menu',
-            'Связаться': 'contact'
+            'Связаться': 'contact',
+            'Отзывы': 'reviews_menu'
         }
     },
     'admin_menu': {
         'message': 'Админ-панель:\nВыберите действие:',
+        'options': ['Модерация', 'В начало'],
+        'next_state': {
+            'Модерация': 'moderation_menu',
+            'В начало': 'main_menu'
+        }
+    },
+    'moderation_menu': {
+        'message': 'Список оставленных отзывов:\n(Пример: тут можно подгрузить реальные отзывы)',
+        'options': ['В начало'],
+        'next_state': {
+            'В начало': 'admin_menu'
+        }
+    },
+    'reviews_menu': {
+        'message': 'Что вы хотите сделать?',
+        'options': ['Написать отзыв', 'Посмотреть отзывы', 'В начало'],
+        'next_state': {
+            'Написать отзыв': 'write_review',
+            'Посмотреть отзывы': 'view_reviews',
+            'В начало': 'main_menu'
+        }
+    },
+    'write_review': {
+        'message': 'Пожалуйста, напишите ваш отзыв:',
         'options': ['В начало'],
         'next_state': {
             'В начало': 'main_menu'
+        }
+    },
+    'view_reviews': {
+        'message': 'Список отзывов:\n(Пример: тут можно подгрузить реальные отзывы)',
+        'options': ['В начало'],
+        'next_state': {
+            'В начало': 'reviews_menu'
         }
     },
     'show_tariffs': {
@@ -164,10 +196,80 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         menu = MENU_TREE['main_menu']
         await send_message(update, context, menu['message'], menu['options'])
         return
+    # Обработка выбора тарифа в меню "Тарифы"
+    if user_state == 'show_tariffs' and user_choice in CLEANING_PRICES:
+        details = CLEANING_DETAILS.get(user_choice)
+        if details:
+            try:
+                # Отправляем изображение
+                with open(details['image_path'], 'rb') as image_file:
+                    await update.message.reply_photo(photo=image_file)
+            except FileNotFoundError:
+                logger.error(f"Изображение не найдено: {details['image_path']}")
+                await update.message.reply_text("Изображение для этого тарифа временно недоступно.")
+            # Сохраняем выбранный тариф для дальнейшего использования в калькуляторе
+            context.user_data['selected_tariff'] = user_choice
+            # Переключаем состояние на меню калькулятора
+            context.user_data['state'] = f'detail_{user_choice}'
+            # Отправляем текст и показываем кнопки "Калькулятор" и "В начало"
+            await send_message(update, context, details['details_text'], MENU_TREE[f'detail_{user_choice}']['options'])
+        return
+
+    # Обработка перехода в калькулятор после выбора тарифа
+    if user_state.startswith('detail_') and user_choice == 'Калькулятор':
+        tariff_name = user_state.split('_')[1]
+        context.user_data['price_per_sqm'] = CLEANING_PRICES[tariff_name]
+        context.user_data['state'] = 'enter_square_meters'
+        await send_message(update, context, MENU_TREE['enter_square_meters']['message'], MENU_TREE['enter_square_meters']['options'])
+        return
+
+    # Обработка ввода квадратных метров
+    if user_state == 'enter_square_meters':
+        try:
+            sqm = float(user_choice)
+            price_per_sqm = context.user_data.get('price_per_sqm')
+            if price_per_sqm is None:
+                await send_message(update, context, 'Произошла ошибка. Пожалуйста, вернитесь в главное меню и начните заново.', ['В начало'])
+                context.user_data['state'] = 'main_menu'
+                return
+
+            result = calculate(price_per_sqm, sqm)
+            await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
+            context.user_data['state'] = 'main_menu'
+        except ValueError:
+            await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.', menu['options'])
+        return
+
+    # Обработка перехода в меню "Связаться"
+    if user_state == 'main_menu' and user_choice == 'Связаться':
+        context.user_data['state'] = 'contact'
+        buttons = [
+            [InlineKeyboardButton("WhatsApp", url="https://wa.me/79956124581")],
+            [InlineKeyboardButton("Telegram", url="https://t.me/kaliroom")],
+            [InlineKeyboardButton("Показать номер", callback_data="show_phone_number")]
+        ]
+        await send_inline_message(update, context, MENU_TREE['contact']['message'], buttons)
+        return
+
+
+
+    if user_state == 'enter_square_meters':
+        try:
+            square_meters = float(user_choice)
+            price_per_sqm = CLEANING_PRICES[context.user_data.get('selected_tariff', 'Повседневная')]
+            result = calculate(price_per_sqm, square_meters)
+            context.user_data['state'] = 'calculate_result'
+            await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
+        except ValueError:
+            await send_message(update, context, "Пожалуйста, введите число.", menu['options'])
+        return
 
     if user_choice in menu['next_state']:
         next_state = menu['next_state'][user_choice]
         context.user_data['state'] = next_state
+
+        if next_state == 'enter_square_meters':
+            context.user_data['selected_tariff'] = user_choice  # Запоминаем выбранный тариф
         next_menu = MENU_TREE.get(next_state)
         if next_menu:
             await send_message(update, context, next_menu['message'], next_menu['options'])
@@ -201,7 +303,7 @@ def main():
     logger.info("Запуск бота")
 
     # Ваш токен
-    TOKEN = '7363733923:AAHKPw_fvjG2F3PBE2XP6Sj49u04uy7wpZE'  # Вставьте ваш токен сюда
+    TOKEN = '7363733923:AAHKPw_fvjG2F3PBE2XP6Sj49u04uy7wpZE'  # Используйте ваш токен
 
     # Создаем объект Application и передаем ему токен
     application = Application.builder().token(TOKEN).build()
