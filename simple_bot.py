@@ -2,6 +2,7 @@
 import logging
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+import telegram.error  # Добавляем этот импорт для доступа к telegram.error.Forbidden
 
 # Настраиваем логирование
 logging.basicConfig(
@@ -62,7 +63,7 @@ MENU_TREE = {
         }
     },
     'moderation_menu': {
-        'message': 'Вы всегда можете вернуться\nв меню администратора)',
+        'message': 'Вы всегда можете вернуться\n(Новые отзывы от пользователей:)',
         'options': ['Админ меню'],  # Добавляем кнопку "Админ меню"
         'next_state': {
             'Админ меню': 'admin_menu'
