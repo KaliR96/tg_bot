@@ -56,19 +56,18 @@ MENU_TREE = {
     },
     'admin_menu': {
         'message': 'Админ-панель:\nВыберите действие:',
-        'options': ['Модерация', 'В начало'],
+        'options': ['Модерация'],  # Убрали 'В начало'
         'next_state': {
             'Модерация': 'moderation_menu',
-            'В начало': 'main_menu'
         }
     },
     'moderation_menu': {
-        'message': 'Список оставленных отзывов:\n(Пример: тут можно подгрузить реальные отзывы)',
-    'options': ['В меню администратора'],
-    'next_state': {
-        'В меню администратора': 'admin_menu'
-    }
-},
+        'message': 'Список оставленных отзывов:',
+        'options': ['В меню администратора'],  # Добавлена кнопка возврата
+        'next_state': {
+            'В меню администратора': 'admin_menu'
+        }
+    },
 
     'reviews_menu': {
         'message': 'Что вы хотите сделать?',
@@ -164,33 +163,36 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # Универсальная функция для обработки переходов между состояниями
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Получаем ID пользователя и текущее состояние
     user_id = update.message.from_user.id
     user_state = context.user_data.get('state', 'main_menu')
 
+    # Логируем текущее состояние для отладки
     logger.info("Текущее состояние: %s", user_state)
 
-    # Инициализация переменной user_choice
+    # Считываем текст сообщения, отправленного пользователем
     user_choice = update.message.text.strip()
 
     # Проверяем, является ли пользователь администратором
     if user_id == ADMIN_ID:
+        # Если администратор в главном меню, переходим в админ-меню
         if user_state == 'main_menu':
             context.user_data['state'] = 'admin_menu'
             menu = MENU_TREE['admin_menu']
             await send_message(update, context, menu['message'], menu['options'])
             return
-        elif user_state == 'admin_menu':
-            if update.message.text == 'Модерация':
-                # Переход сразу к обработке отзывов
-                reviews = context.application.bot_data.get('reviews', [])
 
+        # Если администратор в админ-меню
+        elif user_state == 'admin_menu':
+            if user_choice == 'Модерация':
+                context.user_data['state'] = 'moderation_menu'
+                # Переходим сразу в меню модерации и проверяем отзывы
+                reviews = context.application.bot_data.get('reviews', [])
                 if not reviews:
-                    await send_message(update, context, "Нет отзывов для модерации.",
-                                       MENU_TREE['admin_menu']['options'])
-                    context.user_data['state'] = 'admin_menu'  # Вернуться в админ-меню, если нет отзывов
+                    await send_message(update, context, "Нет отзывов для модерации.", ['В меню администратора'])
                     return
 
-                # Отображаем каждый отзыв с инлайн-кнопками "Опубликовать" и "Удалить"
+                # Если есть отзывы, показываем их с кнопками "Опубликовать" и "Удалить"
                 for i, review in enumerate(reviews):
                     review_text = f"{i + 1}. {review['review']} - {'Одобрено' if review.get('approved', False) else 'На рассмотрении'}"
                     buttons = [
@@ -202,11 +204,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     reply_markup = InlineKeyboardMarkup(buttons)
                     await update.message.reply_text(review_text, reply_markup=reply_markup)
 
-
-
-                # Оставляем пользователя в состоянии `moderation_menu`
-                context.user_data['state'] = 'moderation_menu'
+                # Добавляем кнопку возврата в админ-меню
+                await send_message(update, context, "Вы можете вернуться в админ меню:", ['В меню администратора'])
                 return
+
+        # Если администратор в меню модерации
+        elif user_state == 'moderation_menu':
+            if user_choice == 'В меню администратора':
+                context.user_data['state'] = 'admin_menu'
+                menu = MENU_TREE['admin_menu']
+                await send_message(update, context, menu['message'], menu['options'])
+                return
+
+        # Если пользователь не администратор, обрабатываем обычные состояния
+        # Обработка для других состояний остаётся без изменений
 
         # **Добавьте этот блок после обработки `admin_menu`**
         elif user_state == 'moderation_menu':
