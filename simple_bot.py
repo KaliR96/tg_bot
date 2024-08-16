@@ -62,7 +62,7 @@ MENU_TREE = {
         }
     },
     'moderation_menu': {
-        'message': 'Список оставленных отзывов:\n(Новые отзывы от пользователей:)',
+        'message': 'Вы всегда можете вернуться\nв меню администратора)',
         'options': ['Админ меню'],  # Добавляем кнопку "Админ меню"
         'next_state': {
             'Админ меню': 'admin_menu'
@@ -348,16 +348,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ID вашего канала
 CHANNEL_ID = -1002249882445
 
+
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        # Получаем объект CallbackQuery из обновления
         query = update.callback_query
         await query.answer()
 
-        # Получаем список отзывов из данных бота
         reviews = context.application.bot_data.get('reviews', [])
 
-        # Если callback_data начинается с 'publish_', значит администратор хочет опубликовать отзыв
         if query.data.startswith('publish_'):
             review_index = int(query.data.split('_')[1])
             if 0 <= review_index < len(reviews):
@@ -378,26 +376,26 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         # Проверяем, остались ли еще отзывы для обработки
         if not reviews or all(review.get('approved') for review in reviews):
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны. Вы можете вернуться в меню.")
-            # Переключаем состояние обратно в admin_menu
-            context.user_data['state'] = 'admin_menu'
-            menu = MENU_TREE['admin_menu']
-            await send_message(update, context, menu['message'], menu['options'])
-        else:
-            # Если есть еще отзывы, остаемся в moderation_menu, но также отправляем кнопку "Админ меню"
-            context.user_data['state'] = 'moderation_menu'
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Вы можете вернуться в меню админа.")
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
+
+        # Логируем перед отправкой сообщения с кнопкой
+        logger.info("Отправляем сообщение с кнопкой 'Админ меню'")
+
+        # Проверяем состояние
+        logger.info(f"Текущее состояние после нажатия кнопки: {context.user_data['state']}")
+
+        # Проверка существования сообщения перед отправкой
+        if query.message:
             menu = MENU_TREE['moderation_menu']
-            await send_message(update, context, menu['message'], menu['options'])
+            await context.bot.send_message(chat_id=query.message.chat_id, text=menu['message'],
+                                           reply_markup=ReplyKeyboardMarkup([menu['options']], resize_keyboard=True))
+        else:
+            logger.error("Ошибка: сообщение не существует.")
 
     except Exception as e:
-        # Логирование ошибки в случае возникновения другого исключения
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
 
 
-
-
-# Функция для расчета стоимости уборки
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
     formatted_message = f'Стоимость уборки: {total_cost:.2f} руб.'
