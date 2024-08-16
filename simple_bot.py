@@ -64,11 +64,12 @@ MENU_TREE = {
     },
     'moderation_menu': {
         'message': 'Список оставленных отзывов:\n(Пример: тут можно подгрузить реальные отзывы)',
-        'options': ['В начало'],
-        'next_state': {
-            'В начало': 'admin_menu'
-        }
-    },
+    'options': ['В меню администратора'],
+    'next_state': {
+        'В меню администратора': 'admin_menu'
+    }
+},
+
     'reviews_menu': {
         'message': 'Что вы хотите сделать?',
         'options': ['Написать отзыв', 'Посмотреть отзывы', 'В начало'],
@@ -179,40 +180,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await send_message(update, context, menu['message'], menu['options'])
             return
         elif user_state == 'admin_menu':
-            if update.message.text in MENU_TREE['admin_menu']['next_state']:
-                next_state = MENU_TREE['admin_menu']['next_state'][update.message.text]
-                context.user_data['state'] = next_state
-                next_menu = MENU_TREE.get(next_state)
-                if next_menu:
-                    await send_message(update, context, next_menu['message'], next_menu['options'])
-                return
-            else:
-                await send_message(update, context, 'Пожалуйста, выберите опцию из меню.', MENU_TREE['admin_menu']['options'])
-                return
+            if update.message.text == 'Модерация':
+                # Переход сразу к обработке отзывов
+                reviews = context.application.bot_data.get('reviews', [])
 
-        # Обработка модерации отзывов
-        if user_state == 'moderation_menu':
-            reviews = context.application.bot_data.get('reviews', [])
+                if not reviews:
+                    await send_message(update, context, "Нет отзывов для модерации.",
+                                       MENU_TREE['admin_menu']['options'])
+                    context.user_data['state'] = 'admin_menu'  # Вернуться в админ-меню, если нет отзывов
+                    return
 
-            if not reviews:
-                await send_message(update, context, "Нет отзывов для модерации.",
-                                   MENU_TREE['admin_menu']['options'])
-                return
-
-            # Отображаем каждый отзыв с инлайн-кнопками "Опубликовать" и "Удалить"
-            for i, review in enumerate(reviews):
-                review_text = f"{i + 1}. {review['review']} - {'Одобрено' if review.get('approved', False) else 'На рассмотрении'}"
-                buttons = [
-                    [
-                        InlineKeyboardButton("Опубликовать", callback_data=f'publish_{i}'),
-                        InlineKeyboardButton("Удалить", callback_data=f'delete_{i}')
+                # Отображаем каждый отзыв с инлайн-кнопками "Опубликовать" и "Удалить"
+                for i, review in enumerate(reviews):
+                    review_text = f"{i + 1}. {review['review']} - {'Одобрено' if review.get('approved', False) else 'На рассмотрении'}"
+                    buttons = [
+                        [
+                            InlineKeyboardButton("Опубликовать", callback_data=f'publish_{i}'),
+                            InlineKeyboardButton("Удалить", callback_data=f'delete_{i}')
+                        ]
                     ]
-                ]
-                reply_markup = InlineKeyboardMarkup(buttons)
-                await update.message.reply_text(review_text, reply_markup=reply_markup)
+                    reply_markup = InlineKeyboardMarkup(buttons)
+                    await update.message.reply_text(review_text, reply_markup=reply_markup)
 
-            context.user_data['state'] = 'moderation_menu'
-            return
+
+
+                # Оставляем пользователя в состоянии `moderation_menu`
+                context.user_data['state'] = 'moderation_menu'
+                return
+
+        # **Добавьте этот блок после обработки `admin_menu`**
+        elif user_state == 'moderation_menu':
+            if update.message.text == 'В меню администратора':
+                context.user_data['state'] = 'admin_menu'
+                menu = MENU_TREE['admin_menu']
+                await send_message(update, context, menu['message'], menu['options'])
+                return
 
         # Обработка одобрения отзыва
         if user_state == 'approve_review':
@@ -398,11 +400,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     query = update.callback_query
     await query.answer()
 
-    # Обработка публикации отзыва
+    reviews = context.application.bot_data.get('reviews', [])
+
     if query.data.startswith('publish_'):
         review_index = int(query.data.split('_')[1])
-        reviews = context.application.bot_data.get('reviews', [])
-
         if 0 <= review_index < len(reviews):
             review = reviews[review_index]['review']
             # Отправка сообщения на канал
@@ -411,18 +412,15 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             reviews[review_index]['approved'] = True
             await query.edit_message_text(text="Отзыв успешно опубликован.")
 
-    # Обработка удаления отзыва
     elif query.data.startswith('delete_'):
         review_index = int(query.data.split('_')[1])
-        reviews = context.application.bot_data.get('reviews', [])
-
         if 0 <= review_index < len(reviews):
             del reviews[review_index]
             await query.edit_message_text(text="Отзыв успешно удален.")
 
-    # Обработка показа номера телефона
     elif query.data == "show_phone_number":
         await query.edit_message_text(text="📞 Телефон: +7 995 612 45 81")
+
 
     # Получаем данные из callback_data
     action, review_index = query.data.split('_')
@@ -462,9 +460,16 @@ def calculate(price_per_sqm, sqm):
 
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    context.user_data['state'] = 'main_menu'
-    menu = MENU_TREE['main_menu']
+    user_id = update.message.from_user.id
+    if user_id == ADMIN_ID:
+        context.user_data['state'] = 'admin_menu'
+        menu = MENU_TREE['admin_menu']
+    else:
+        context.user_data['state'] = 'main_menu'
+        menu = MENU_TREE['main_menu']
+
     await send_message(update, context, menu['message'], menu['options'])
+
 
 # Основная функция для запуска бота
 def main():
