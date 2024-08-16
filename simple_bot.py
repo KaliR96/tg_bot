@@ -62,13 +62,12 @@ MENU_TREE = {
         }
     },
     'moderation_menu': {
-        'message': 'Список оставленных отзывов:\n(Пример: тут можно подгрузить реальные отзывы)',
-        'options': ['В меню администратора'],
+        'message': 'Список оставленных отзывов:\n(Новые отзывы от пользователей:)',
+        'options': ['Админ меню'],  # Добавляем кнопку "Админ меню"
         'next_state': {
-            'В меню администратора': 'admin_menu'
+            'Админ меню': 'admin_menu'
         }
     },
-
     'reviews_menu': {
         'message': 'Что вы хотите сделать?',
         'options': ['Написать отзыв', 'Посмотреть отзывы', 'В начало'],
@@ -165,16 +164,15 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Универсальная функция для обработки переходов между состояниями
 
 # Универсальная функция для обработки переходов между состояниями
+    # Универсальная функция для обработки переходов между состояниями
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
     user_state = context.user_data.get('state', 'main_menu')
 
     logger.info("Текущее состояние: %s", user_state)
 
-    # Инициализация переменной user_choice
     user_choice = update.message.text.strip()
 
-    # Проверяем, является ли пользователь администратором
     if user_id == ADMIN_ID:
         if user_state == 'main_menu':
             context.user_data['state'] = 'admin_menu'
@@ -184,7 +182,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         elif user_state == 'admin_menu':
             if user_choice == 'Модерация':
-                # Переход сразу к обработке отзывов
                 reviews = context.application.bot_data.get('reviews', [])
                 if not reviews:
                     await send_message(update, context, "Нет отзывов для модерации.",
@@ -192,29 +189,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     context.user_data['state'] = 'admin_menu'
                     return
 
-                # Отображаем каждый отзыв с инлайн-кнопками "Опубликовать" и "Удалить"
                 for i, review in enumerate(reviews):
                     review_text = f"{i + 1}. {review['review']} - {'Одобрено' if review.get('approved', False) else 'На рассмотрении'}"
                     buttons = [
-                        [
-                            InlineKeyboardButton("Опубликовать", callback_data=f'publish_{i}'),
-                            InlineKeyboardButton("Удалить", callback_data=f'delete_{i}')
-                        ]
+                        [InlineKeyboardButton("Опубликовать", callback_data=f'publish_{i}'),
+                         InlineKeyboardButton("Удалить", callback_data=f'delete_{i}')]
                     ]
                     reply_markup = InlineKeyboardMarkup(buttons)
                     await update.message.reply_text(review_text, reply_markup=reply_markup)
 
                 context.user_data['state'] = 'moderation_menu'
-                return
+                return  # Здесь убираем отправку повторного сообщения
 
         elif user_state == 'moderation_menu':
-            if user_choice == 'В меню администратора':
+            if user_choice == 'Админ меню':
                 context.user_data['state'] = 'admin_menu'
                 menu = MENU_TREE['admin_menu']
                 await send_message(update, context, menu['message'], menu['options'])
                 return
 
-    # Обработка написания отзыва
+    # Обработка других состояний...
+
     if user_state == 'write_review':
         review = user_choice
         if review:
@@ -353,7 +348,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ID вашего канала
 CHANNEL_ID = -1002249882445
 
-
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         # Получаем объект CallbackQuery из обновления
@@ -368,7 +362,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             review_index = int(query.data.split('_')[1])
             if 0 <= review_index < len(reviews):
                 review = reviews[review_index]['review']
-                # Обертывание вызова в try-except
                 try:
                     await context.bot.send_message(chat_id=CHANNEL_ID, text=review)
                     reviews[review_index]['approved'] = True
@@ -377,39 +370,31 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     logger.error(f"Не удалось отправить сообщение в канал: {e}")
                     await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
 
-        # Аналогично можно обернуть другие вызовы методов, которые могут вызвать исключения
+        elif query.data.startswith('delete_'):
+            review_index = int(query.data.split('_')[1])
+            if 0 <= review_index < len(reviews):
+                del reviews[review_index]
+                await query.edit_message_text(text="Отзыв безвозвратно удален.")
+
+        # Проверяем, остались ли еще отзывы для обработки
+        if not reviews or all(review.get('approved') for review in reviews):
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны. Вы можете вернуться в меню.")
+            # Переключаем состояние обратно в admin_menu
+            context.user_data['state'] = 'admin_menu'
+            menu = MENU_TREE['admin_menu']
+            await send_message(update, context, menu['message'], menu['options'])
+        else:
+            # Если есть еще отзывы, остаемся в moderation_menu, но также отправляем кнопку "Админ меню"
+            context.user_data['state'] = 'moderation_menu'
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Вы можете вернуться в меню админа.")
+            menu = MENU_TREE['moderation_menu']
+            await send_message(update, context, menu['message'], menu['options'])
 
     except Exception as e:
         # Логирование ошибки в случае возникновения другого исключения
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
 
 
-
-    # Получаем данные из callback_data
-    action, review_index = query.data.split('_')
-    review_index = int(review_index)
-
-    # Получаем список отзывов
-    reviews = context.application.bot_data.get('reviews', [])
-
-    # Убедимся, что индекс в пределах списка
-    if 0 <= review_index < len(reviews):
-        if action == 'publish':
-            # Отправляем отзыв в указанный канал или чат
-            channel_id = '@CleaningSphere'  # Замените на ваш ID канала или чата
-            review_text = reviews[review_index]['review']
-            await context.bot.send_message(chat_id=channel_id, text=review_text)
-
-            # Отмечаем отзыв как одобренный
-            reviews[review_index]['approved'] = True
-            await query.edit_message_text(text="Отзыв опубликован.")
-
-        elif action == 'delete':
-            # Удаляем отзыв из списка
-            del reviews[review_index]
-            await query.edit_message_text(text="Отзыв удален.")
-    else:
-        await query.edit_message_text(text="Ошибка: отзыв не найден.")
 
 
 # Функция для расчета стоимости уборки
