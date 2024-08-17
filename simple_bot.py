@@ -200,7 +200,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_choice = update.message.text.strip()
     # Обработка нажатия кнопки "Посмотреть Отзывы💬"
     if user_state == 'reviews_menu' and user_choice == 'Посмотреть Отзывы💬':
-        channel_url = "https://t.me/your_channel_username"  # Замените на реальную ссылку на канал
+        channel_url = "https://t.me/CleaningSphere"  # Замените на реальную ссылку на канал
         await update.message.reply_text(f"Просмотрите все отзывы на нашем канале: {channel_url}")
 
         # Добавляем кнопку "В начало🔙"
@@ -479,6 +479,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if 0 <= review_index < len(reviews):
                 review = reviews[review_index]
                 try:
+                    # Отправляем информацию об авторе администратору
+                    review_info = (
+                        f"Отзыв от {review['user_name']} (ID: {review['user_id']}) будет опубликован.\n"
+                        f"Текст отзыва: {review['review']}"
+                    )
+                    await context.bot.send_message(chat_id=ADMIN_ID, text=review_info)
+
                     # Пересылаем сообщение в канал
                     await context.bot.forward_message(
                         chat_id=CHANNEL_ID,
@@ -507,6 +514,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
+
 
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
