@@ -267,6 +267,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 'message_id': message_id,
                 'approved': False
             })
+
+            # Логируем данные для проверки
+            logger.info(f"Отзыв сохранен: {review} от {user_name} (ID: {user_id}, Message ID: {message_id})")
+
             await send_message(update, context,
                                "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
                                MENU_TREE['main_menu']['options'])
@@ -292,6 +296,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"{i + 1}. {review['review']} - {'Одобрено' if review.get('approved', False) else 'На рассмотрении'}\n"
                 f"Автор: {review['user_name']} (ID: {review['user_id']})"
             )
+            logger.info(f"Отображаем отзыв для модерации: {review_text}")  # Логируем данные для проверки
+
             buttons = [
                 [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
                  InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
