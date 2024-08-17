@@ -26,19 +26,19 @@ CLEANING_PRICES = {
 # Пути к изображениям и текст для каждого тарифа
 CLEANING_DETAILS = {
     'Ген.Уборка🧼': {
-        'image_path': r'C:\Users\travo\Desktop\tg_bot\генералка.jpg',
+        'image_path': r'C:\Users\travo\Desktop\tg_bot\img\general.jpg',
         'details_text': 'Генеральная уборка включает в себя полную уборку всей квартиры: удаление пыли, чистка полов, влажная уборка всех поверхностей и т.д.'
     },
     'Повседневная🧹 ': {
-        'image_path': r'C:\Users\travo\Desktop\tg_bot\повседневка.jpg',
+        'image_path': r'C:\Users\travo\Desktop\tg_bot\img\vacuumcat.png',
         'details_text': 'Повседневная🧹  уборка включает поддержание чистоты: протирка пыли, мытье полов, уборка на кухне и в санузле.'
     },
     'Послестрой🛠 ': {
-        'image_path': r'C:\Users\travo\Desktop\tg_bot\Послестрой🛠 .jpg',
+        'image_path': r'C:\Users\travo\Desktop\tg_bot\img\build.jpg',
         'details_text': 'Уборка после ремонта включает удаление строительной пыли, очистку окон и дверей, удаление следов краски и т.д.'
     },
     'мытье окон🧴': {
-        'image_path': r'C:\Users\travo\Desktop\tg_bot\окна.jpg',
+        'image_path': r'C:\Users\travo\Desktop\tg_bot\img\window.jpg',
         'details_text': 'мытье окон🧴 включает очистку стекол снаружи и изнутри, а также протирку рам и подоконников.'
     }
 }
@@ -47,7 +47,10 @@ CLEANING_DETAILS = {
 MENU_TREE = {
     'main_menu': {
         'message': 'Привет! Я Вера, твоя фея чистоты.\nМой робот-уборщик поможет:\n- рассчитать стоимость уборки\n- Связаться📞 со мной.',
-        'options': ['Тарифы🏷️', 'Калькулятор🧮', 'Связаться📞', 'Отзывы💬'],
+        'options': [
+            ['Тарифы🏷️', 'Калькулятор🧮'],  # Первая строка
+            ['Связаться📞', 'Отзывы💬']     # Вторая строка
+        ],
         'next_state': {
             'Тарифы🏷️': 'show_tariffs',
             'Калькулятор🧮': 'calculator_menu',
@@ -151,9 +154,16 @@ for tariff_name, details in CLEANING_DETAILS.items():
 
 # Функция для отправки сообщения с клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
-    reply_markup = ReplyKeyboardMarkup([options], resize_keyboard=True, one_time_keyboard=True)
+    # Проверяем, что `options` это список списков
+    if isinstance(options[0], list):
+        reply_markup = ReplyKeyboardMarkup(options, resize_keyboard=True, one_time_keyboard=True)
+    else:
+        # Если `options` - это просто список, преобразуем его в список списков
+        reply_markup = ReplyKeyboardMarkup([options], resize_keyboard=True, one_time_keyboard=True)
+
     await update.message.reply_text(message, reply_markup=reply_markup)
     logger.info("Отправлено сообщение: %s", message)
+
 
 # Функция для отправки сообщения с inline-кнопками
 async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, buttons: list) -> None:
