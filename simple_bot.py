@@ -474,39 +474,43 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         reviews = context.application.bot_data.get('reviews', [])
 
         # Обработка нажатий в состоянии модерации отзывов
-        if user_state == 'moderation_menu' and query.data.startswith('publish_'):
+        if user_state == 'moderation_menu' and (query.data.startswith('publish_') or query.data.startswith('delete_')):
             review_index = int(query.data.split('_')[1])
             if 0 <= review_index < len(reviews):
                 review = reviews[review_index]
-                try:
-                    # Отправляем информацию об авторе администратору
-                    review_info = (
-                        f"Отзыв от {review['user_name']} (ID: {review['user_id']}) будет опубликован.\n"
-                        f"Текст отзыва: {review['review']}"
-                    )
-                    await context.bot.send_message(chat_id=ADMIN_ID, text=review_info)
 
-                    # Пересылаем сообщение в канал
-                    await context.bot.forward_message(
-                        chat_id=CHANNEL_ID,
-                        from_chat_id=review['user_id'],
-                        message_id=review['message_id']
-                    )
-                    reviews[review_index]['approved'] = True
-                    await query.edit_message_text(text="Отзыв успешно опубликован.")
-                except telegram.error.Forbidden as e:
-                    logger.error(f"Не удалось переслать сообщение в канал: {e}")
-                    await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
+                # Информация об авторе и тексте отзыва
+                review_info = (
+                    f"Отзыв от {review['user_name']} (ID: {review['user_id']})\n"
+                    f"Текст отзыва: {review['review']}"
+                )
 
-        elif query.data.startswith('delete_'):
-            review_index = int(query.data.split('_')[1])
-            if 0 <= review_index < len(reviews):
-                del reviews[review_index]
-                await query.edit_message_text(text="Отзыв безвозвратно удален.")
+                # Проверка на публикацию отзыва
+                if query.data.startswith('publish_'):
+                    try:
+                        await context.bot.send_message(chat_id=ADMIN_ID, text=review_info)
+                        await context.bot.forward_message(
+                            chat_id=CHANNEL_ID,
+                            from_chat_id=review['user_id'],
+                            message_id=review['message_id']
+                        )
+                        reviews[review_index]['approved'] = True
+                        await query.edit_message_text(text="Отзыв успешно опубликован.")
+                    except telegram.error.Forbidden as e:
+                        logger.error(f"Не удалось переслать сообщение в канал: {e}")
+                        await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
 
+                # Проверка на удаление отзыва
+                elif query.data.startswith('delete_'):
+                    await context.bot.send_message(chat_id=ADMIN_ID, text=f"Отзыв удален: {review['review']}")
+                    del reviews[review_index]
+                    await query.edit_message_text(text="Отзыв безвозвратно удален.")
+
+        # Проверка на наличие необработанных отзывов
         if not reviews or all(review.get('approved') for review in reviews):
             await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
 
+        # Возвращение в меню модерации
         menu = MENU_TREE['moderation_menu']
         await context.bot.send_message(chat_id=query.message.chat_id, text=menu['message'],
                                        reply_markup=ReplyKeyboardMarkup([menu['options']], resize_keyboard=True))
@@ -514,6 +518,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
+
 
 
 def calculate(price_per_sqm, sqm):
