@@ -153,12 +153,13 @@ for tariff_name, details in CLEANING_DETAILS.items():
     MENU_TREE[f'detail_{tariff_name}'] = {
         'message': details['details_text'],
         'image_path': details['image_path'],
-        'options': ['Калькулятор🧮', 'В начало🔙'],
+        'options': ['Калькулятор🧮', 'Назад'],  # Заменяем "В начало🔙" на "Назад"
         'next_state': {
             'Калькулятор🧮': 'calculator_menu',
-            'В начало🔙': 'main_menu'
+            'Назад': 'show_tariffs'  # Возвращаемся к списку тарифов
         }
     }
+
 
 # Функция для отправки сообщения с клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
@@ -180,10 +181,6 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info("Отправлено сообщение с кнопками: %s", message)
 
 # Универсальная функция для обработки переходов между состояниями
-    # Универсальная функция для обработки переходов между состояниями
-
-# Универсальная функция для обработки переходов между состояниями
-    # Универсальная функция для обработки переходов между состояниями
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
     user_state = context.user_data.get('state', 'main_menu')
@@ -191,6 +188,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     logger.info("Текущее состояние: %s", user_state)
 
     user_choice = update.message.text.strip()
+
+    # Обработка нажатия кнопки "Назад" при показе тарифов
+    if user_state.startswith('detail_') and user_choice == 'Назад':
+        context.user_data['state'] = 'show_tariffs'
+        await send_message(update, context, MENU_TREE['show_tariffs']['message'], MENU_TREE['show_tariffs']['options'])
+        return
 
     if user_id == ADMIN_ID:
         if user_state == 'main_menu':
@@ -370,7 +373,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'), menu['options'])
 
-# Обработка нажатий на inline-кнопки
+
 # ID вашего канала
 CHANNEL_ID = -1002249882445
 
