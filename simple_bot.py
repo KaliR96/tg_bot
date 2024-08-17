@@ -383,46 +383,57 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         query = update.callback_query
         await query.answer()
 
-        reviews = context.application.bot_data.get('reviews', [])
+        user_id = query.from_user.id
+        user_state = context.user_data.get('state', 'main_menu')
 
-        if query.data.startswith('publish_'):
-            review_index = int(query.data.split('_')[1])
-            if 0 <= review_index < len(reviews):
-                review = reviews[review_index]['review']
-                try:
-                    await context.bot.send_message(chat_id=CHANNEL_ID, text=review)
-                    reviews[review_index]['approved'] = True
-                    await query.edit_message_text(text="Отзыв успешно опубликован.")
-                except telegram.error.Forbidden as e:
-                    logger.error(f"Не удалось отправить сообщение в канал: {e}")
-                    await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
+        logger.info(f"Текущее состояние при нажатии на инлайн-кнопку: {user_state}")
 
-        elif query.data.startswith('delete_'):
-            review_index = int(query.data.split('_')[1])
-            if 0 <= review_index < len(reviews):
-                del reviews[review_index]
-                await query.edit_message_text(text="Отзыв безвозвратно удален.")
+        # Обработка нажатий в состоянии 'contact'
+        if user_state == 'contact':
+            if query.data == 'show_phone_number':
+                await query.edit_message_text(text="Наш номер телефона: +79956124581")
+            elif query.data == 'contact_whatsapp':
+                await query.edit_message_text(text="Свяжитесь с нами в WhatsApp: https://wa.me/79956124581")
+            elif query.data == 'contact_telegram':
+                await query.edit_message_text(text="Свяжитесь с нами в Telegram: https://t.me/kaliroom")
+            return
 
-        # Проверяем, остались ли еще Отзывы💬 для обработки
-        if not reviews or all(review.get('approved') for review in reviews):
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Все Отзывы💬 обработаны.")
+        # Обработка нажатий в состоянии модерации отзывов
+        if user_state == 'moderation_menu':
+            reviews = context.application.bot_data.get('reviews', [])
 
-        # Логируем перед отправкой сообщения с кнопкой
-        logger.info("Отправляем сообщение с кнопкой 'Админ меню'")
+            if query.data.startswith('publish_'):
+                review_index = int(query.data.split('_')[1])
+                if 0 <= review_index < len(reviews):
+                    review = reviews[review_index]['review']
+                    try:
+                        await context.bot.send_message(chat_id=CHANNEL_ID, text=review)
+                        reviews[review_index]['approved'] = True
+                        await query.edit_message_text(text="Отзыв успешно опубликован.")
+                    except telegram.error.Forbidden as e:
+                        logger.error(f"Не удалось отправить сообщение в канал: {e}")
+                        await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
 
-        # Проверяем состояние
-        logger.info(f"Текущее состояние после нажатия кнопки: {context.user_data['state']}")
+            elif query.data.startswith('delete_'):
+                review_index = int(query.data.split('_')[1])
+                if 0 <= review_index < len(reviews):
+                    del reviews[review_index]
+                    await query.edit_message_text(text="Отзыв безвозвратно удален.")
 
-        # Проверка существования сообщения перед отправкой
-        if query.message:
+            # Проверяем, остались ли еще отзывы для обработки
+            if not reviews or all(review.get('approved') for review in reviews):
+                await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
+
+            # Возвращаем администратора в меню модерации
             menu = MENU_TREE['moderation_menu']
             await context.bot.send_message(chat_id=query.message.chat_id, text=menu['message'],
                                            reply_markup=ReplyKeyboardMarkup([menu['options']], resize_keyboard=True))
-        else:
-            logger.error("Ошибка: сообщение не существует.")
+            return
 
+        logger.warning("Неизвестное состояние или неподдерживаемая инлайн-кнопка.")
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
+
 
 
 def calculate(price_per_sqm, sqm):
