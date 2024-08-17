@@ -206,11 +206,44 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # Универсальная функция для обработки переходов между состояниями
+# Функция для обработки текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
     user_state = context.user_data.get('state', 'main_menu')
 
     logger.info("Текущее состояние: %s", user_state)
+
+    user_choice = update.message.text.strip()
+
+    # Если сообщение пришло от администратора и он выбрал "Модерация"
+    if user_id == ADMIN_ID and user_state == 'admin_menu':
+        if user_choice == 'Модерация':
+            reviews = context.application.bot_data.get('reviews', [])
+            if not reviews:
+                await send_message(update, context, "Нет отзывов для модерации.",
+                                   MENU_TREE['admin_menu']['options'])
+                context.user_data['state'] = 'admin_menu'
+                return
+
+            # Формируем и отправляем админу информацию об отзывах с метаданными автора
+            for i, review in enumerate(reviews):
+                review_text = (
+                    f"Отзыв №{i + 1}:\n"
+                    f"{review['review']}\n\n"
+                    f"Автор: {review['user_name']} (ID: {review['user_id']})"
+                )
+                logger.info(f"Отображаем отзыв для модерации: {review_text}")
+
+                # Добавляем кнопки для публикации или удаления отзыва
+                buttons = [
+                    [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
+                     InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
+                ]
+                reply_markup = InlineKeyboardMarkup(buttons)
+                await update.message.reply_text(review_text, reply_markup=reply_markup)
+
+            context.user_data['state'] = 'moderation_menu'
+            return
 
     user_choice = update.message.text.strip()
     # Обработка нажатия кнопки "Посмотреть Отзывы💬"
@@ -485,6 +518,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 CHANNEL_ID = -1002249882445
 
 
+# Функция для обработки нажатий на inline-кнопки
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         query = update.callback_query
@@ -493,40 +527,38 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         user_state = context.user_data.get('state', 'main_menu')
         reviews = context.application.bot_data.get('reviews', [])
 
-        # Обработка нажатий в состоянии модерации отзывов
-        if user_state == 'moderation_menu' and query.data.startswith('publish_'):
+        # Обработка нажатий в режиме модерации отзывов
+        if user_state == 'moderation_menu':
             review_index = int(query.data.split('_')[1])
             if 0 <= review_index < len(reviews):
                 review = reviews[review_index]
-                try:
-                    # Отправляем информацию об авторе администратору
-                    review_info = (
-                        f"Отзыв от {review['user_name']} (ID: {review['user_id']}) будет опубликован.\n"
-                        f"Текст отзыва: {review['review']}"
-                    )
-                    await context.bot.send_message(chat_id=ADMIN_ID, text=review_info)
 
-                    # Пересылаем сообщение в канал
-                    await context.bot.forward_message(
-                        chat_id=CHANNEL_ID,
-                        from_chat_id=review['user_id'],
-                        message_id=review['message_id']
-                    )
-                    reviews[review_index]['approved'] = True
-                    await query.edit_message_text(text="Отзыв успешно опубликован.")
-                except telegram.error.Forbidden as e:
-                    logger.error(f"Не удалось переслать сообщение в канал: {e}")
-                    await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
+                # Обработка публикации отзыва
+                if query.data.startswith('publish_'):
+                    try:
+                        # Пересылаем сообщение в канал
+                        await context.bot.forward_message(
+                            chat_id=CHANNEL_ID,
+                            from_chat_id=review['user_id'],
+                            message_id=review['message_id']
+                        )
+                        reviews[review_index]['approved'] = True
+                        await query.edit_message_text(text="Отзыв успешно опубликован.")
+                    except telegram.error.Forbidden as e:
+                        logger.error(f"Не удалось переслать сообщение в канал: {e}")
+                        await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
 
-        elif query.data.startswith('delete_'):
-            review_index = int(query.data.split('_')[1])
-            if 0 <= review_index < len(reviews):
-                del reviews[review_index]
-                await query.edit_message_text(text="Отзыв безвозвратно удален.")
+                # Обработка удаления отзыва
+                elif query.data.startswith('delete_'):
+                    await context.bot.send_message(chat_id=ADMIN_ID, text=f"Отзыв удален: {review['review']}")
+                    del reviews[review_index]
+                    await query.edit_message_text(text="Отзыв безвозвратно удален.")
 
+        # Проверка на наличие необработанных отзывов
         if not reviews or all(review.get('approved') for review in reviews):
             await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
 
+        # Возвращение в меню модерации
         menu = MENU_TREE['moderation_menu']
         await context.bot.send_message(chat_id=query.message.chat_id, text=menu['message'],
                                        reply_markup=ReplyKeyboardMarkup([menu['options']], resize_keyboard=True))
