@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import asyncio
+import uuid
 from telegram.ext import CallbackContext
 import httpx
 import logging
@@ -7,6 +9,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 
 import telegram.error  # Добавляем этот импорт для доступа к telegram.error.Forbidden
+
+review_lock = asyncio.Lock()
 
 # Настраиваем логирование на уровне DEBUG
 logging.basicConfig(
@@ -182,7 +186,6 @@ MENU_TREE = {
 }
 
 # Вставляем здесь вспомогательные функции:
-
 def extract_review_id(data: str) -> int:
     # Пример: извлечение ID отзыва из строки данных
     return int(data.split('_')[1])
@@ -196,6 +199,21 @@ def mark_review_as_published(review_id: int) -> None:
     # Пример: обновление состояния отзыва как опубликованного
     pass
 
+
+def add_review(context, user_name, review_text, photo_file_ids):
+    reviews = context.bot_data.get('reviews', [])
+    review_id = str(uuid.uuid4())  # Генерация уникального идентификатора
+    review = {
+        'id': review_id,
+        'user_name': user_name,
+        'review': review_text,
+        'photo_file_ids': photo_file_ids,
+        'approved': False
+    }
+    reviews.append(review)
+    context.bot_data['reviews'] = reviews
+
+
 # Динамическое добавление состояний для каждого тарифа с кнопкой "Калькулятор🧮"
 for tariff_name, details in CLEANING_DETAILS.items():
     MENU_TREE[f'detail_{tariff_name}'] = {
@@ -207,7 +225,6 @@ for tariff_name, details in CLEANING_DETAILS.items():
             'Назад': 'show_tariffs'  # Возвращаемся к списку тарифов
         }
     }
-
 
 # Функция для отправки сообщения с клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
@@ -221,128 +238,139 @@ async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, messa
     await update.message.reply_text(message, reply_markup=reply_markup)
     logger.info("Отправлено сообщение: %s", message)
 
-
 # Функция для отправки сообщения с inline-кнопками
 async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, buttons: list) -> None:
     keyboard = InlineKeyboardMarkup(buttons)
     await update.message.reply_text(message, reply_markup=keyboard)
     logger.info("Отправлено сообщение с кнопками: %s", message)
 
-
 # Универсальная функция для обработки переходов между состояниями
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.message.from_user.id
-    user_state = context.user_data.get('state', 'main_menu')
-    logger.info("Текущее состояние: %s", user_state)
+    try:
+        async with review_lock:
+            user_id = update.message.from_user.id
+            user_state = context.user_data.get('state', 'main_menu')
+            logger.info(f"Текущее состояние: {user_state}, ID пользователя: {user_id}")
 
-    # Проверка на отзыв с фотографией
-    if user_state == 'write_review':
-        review_text = update.message.text.strip() if update.message.text else ""
-        user_name = update.message.from_user.full_name
-        message_id = update.message.message_id
+            # Обработка отзыва с фотографией
+            if user_state == 'write_review':
+                review_text = update.message.text.strip() if update.message.text else ""
+                user_name = update.message.from_user.full_name
+                message_id = update.message.message_id
 
-        # Обработка фотографий
-        if update.message.photo:
-            photo_file_id = update.message.photo[-1].file_id
-            if 'photo_file_ids' not in context.user_data:
-                context.user_data['photo_file_ids'] = []
-            context.user_data['photo_file_ids'].append(photo_file_id)
+                # Обработка фотографий
+                if update.message.photo:
+                    photo_file_id = update.message.photo[-1].file_id
+                    context.user_data.setdefault('photo_file_ids', []).append(photo_file_id)
+                    logger.info(f"Получено фото от {user_name} (ID: {user_id}). File ID: {photo_file_id}")
 
-            logger.info(f"Получено фото от {user_name} (ID: {user_id}). File ID: {photo_file_id}")
+                # Если текст и/или фото переданы
+                if review_text or context.user_data.get('photo_file_ids'):
+                    review_data = {
+                        'review': review_text,
+                        'user_name': user_name,
+                        'user_id': user_id,
+                        'message_id': message_id,
+                        'approved': False,
+                        'photo_file_ids': context.user_data.pop('photo_file_ids', [])
+                    }
 
-        # Если текст и/или фото переданы
-        if review_text or 'photo_file_ids' in context.user_data:
-            # Сохраняем отзыв с текстом и/или фото
-            review_data = {
-                'review': review_text,
-                'user_name': user_name,
-                'user_id': user_id,
-                'message_id': message_id,
-                'approved': False,
-                'photo_file_ids': context.user_data.get('photo_file_ids', [])
-            }
+                    context.application.bot_data.setdefault('reviews', []).append(review_data)
+                    logger.info(f"Отзыв сохранен: {review_text} от {user_name} (ID: {user_id}, Message ID: {message_id}, Photos: {len(review_data['photo_file_ids'])})")
 
-            # Сохраняем отзыв в бот-данные
-            context.application.bot_data.setdefault('reviews', []).append(review_data)
-            context.user_data.pop('photo_file_ids', None)  # Очищаем временные данные о фото
+                    await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
+                                       MENU_TREE['main_menu']['options'])
+                    context.user_data['state'] = 'main_menu'
+                    return
 
-            logger.info(f"Отзыв сохранен: {review_text} от {user_name} (ID: {user_id}, Message ID: {message_id}, Photos: {len(review_data['photo_file_ids'])})")
+                if 'photo_file_ids' in context.user_data:
+                    await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
+                    return
 
-            await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
-                               MENU_TREE['main_menu']['options'])
-            context.user_data['state'] = 'main_menu'
-            return
+            # Обработка сообщения от администратора и выбор "Модерация"
+            if user_id == ADMIN_ID and user_state == 'admin_menu':
+                if update.message.text.strip() == 'Модерация':
+                    reviews = context.application.bot_data.get('reviews', [])
+                    pending_reviews = [review for review in reviews if not review['approved']]
 
-        # Если есть фото, но нет текста, продолжаем ожидать текст
-        if 'photo_file_ids' in context.user_data:
-            await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
-            return
+                    if not pending_reviews:
+                        await send_message(update, context, "Нет отзывов для модерации.",
+                                           MENU_TREE['admin_menu']['options'])
+                        context.user_data['state'] = 'admin_menu'
+                        return
 
+                    for i, review in enumerate(pending_reviews):
+                        review_text = f"{i + 1}. {review['review']} - На рассмотрении"
+                        buttons = [
+                            [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
+                             InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
+                        ]
+                        reply_markup = InlineKeyboardMarkup(buttons)
+                        await update.message.reply_text(review_text, reply_markup=reply_markup)
 
-        # Если нет текста, но есть фото, продолжаем ожидать текст
-        if 'photo_file_ids' in context.user_data:
-            await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
-            return
+                    context.user_data['state'] = 'moderation_menu'
+                    return
 
-    # Если сообщение пришло от администратора и он выбрал "Модерация"
-    if user_id == ADMIN_ID and user_state == 'admin_menu':
-        if update.message.text.strip() == 'Модерация':
-            reviews = context.application.bot_data.get('reviews', [])
-            pending_reviews = [review for review in reviews if not review.get('approved', False)]
+            # Обработка нажатия кнопки "Посмотреть Отзывы💬"
+            if user_state == 'reviews_menu' and update.message.text.strip() == 'Посмотреть Отзывы💬':
+                channel_url = "https://t.me/CleaningSphere"
+                await update.message.reply_text(f"Просмотрите все отзывы на нашем канале: {channel_url}")
 
-            if not pending_reviews:
-                await send_message(update, context, "Нет отзывов для модерации.",
-                                   MENU_TREE['admin_menu']['options'])
-                context.user_data['state'] = 'admin_menu'
+                reply_keyboard = [['В начало🔙']]
+                reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+                await update.message.reply_text("Вернуться в главное меню:", reply_markup=reply_markup)
+
+                context.user_data['state'] = 'main_menu'
                 return
 
-            for i, review in enumerate(pending_reviews):
-                review_text = (
-                    f"Отзыв №{i + 1}:\n"
-                    f"{review['review']}\n\n"
-                    f"Автор: {review['user_name']} (ID: {review['user_id']})"
-                )
-                logger.info(f"Отображаем отзыв для модерации: {review_text}")
+            # Обработка нажатия кнопки "Назад" при показе тарифов
+            if user_state.startswith('detail_') and update.message.text.strip() == 'Назад':
+                context.user_data['state'] = 'show_tariffs'
+                await send_message(update, context, MENU_TREE['show_tariffs']['message'], MENU_TREE['show_tariffs']['options'])
+                return
 
-                buttons = [
-                    [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                     InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
-                ]
-                reply_markup = InlineKeyboardMarkup(buttons)
-                await update.message.reply_text(review_text, reply_markup=reply_markup)
+            # Если сообщение пришло от администратора в главном меню
+            if user_id == ADMIN_ID:
+                if user_state == 'main_menu':
+                    context.user_data['state'] = 'admin_menu'
+                    menu = MENU_TREE['admin_menu']
+                    await send_message(update, context, menu['message'], menu['options'])
+                    return
 
-            context.user_data['state'] = 'moderation_menu'
-            return
+                if user_state == 'admin_menu' and update.message.text.strip() == 'Модерация':
+                    reviews = context.application.bot_data.get('reviews', [])
+                    pending_reviews = [review for review in reviews if not review['approved']]
 
-    # Обработка нажатия кнопки "Посмотреть Отзывы💬"
-    if user_state == 'reviews_menu' and update.message.text.strip() == 'Посмотреть Отзывы💬':
-        channel_url = "https://t.me/CleaningSphere"  # Замените на реальную ссылку на канал
-        await update.message.reply_text(f"Просмотрите все отзывы на нашем канале: {channel_url}")
+                    if not pending_reviews:
+                        await send_message(update, context, "Нет отзывов для модерации.",
+                                           MENU_TREE['admin_menu']['options'])
+                        context.user_data['state'] = 'admin_menu'
+                        return
 
-        reply_keyboard = [['В начало🔙']]
-        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
-        await update.message.reply_text("Вернуться в главное меню:", reply_markup=reply_markup)
+                    for i, review in enumerate(pending_reviews):
+                        review_text = f"{i + 1}. {review['review']} - На рассмотрении"
+                        buttons = [
+                            [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
+                             InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
+                        ]
+                        reply_markup = InlineKeyboardMarkup(buttons)
+                        await update.message.reply_text(review_text, reply_markup=reply_markup)
 
-        context.user_data['state'] = 'main_menu'
-        return
+                    context.user_data['state'] = 'moderation_menu'
+                    return
 
-    # Обработка нажатия кнопки "Назад" при показе тарифов
-    if user_state.startswith('detail_') and update.message.text.strip() == 'Назад':
-        context.user_data['state'] = 'show_tariffs'
-        await send_message(update, context, MENU_TREE['show_tariffs']['message'], MENU_TREE['show_tariffs']['options'])
-        return
+                if user_state == 'moderation_menu' and update.message.text.strip() == 'Админ меню':
+                    context.user_data['state'] = 'admin_menu'
+                    menu = MENU_TREE['admin_menu']
+                    await send_message(update, context, menu['message'], menu['options'])
+                    return
 
-    if user_id == ADMIN_ID:
-        if user_state == 'main_menu':
-            context.user_data['state'] = 'admin_menu'
-            menu = MENU_TREE['admin_menu']
-            await send_message(update, context, menu['message'], menu['options'])
-            return
-
-        if user_state == 'admin_menu':
-            if update.message.text.strip() == 'Модерация':
+            # Обработка модерации отзывов
+            if user_state == 'moderation_menu':
                 reviews = context.application.bot_data.get('reviews', [])
-                pending_reviews = [review for review in reviews if not review.get('approved', False)]
+                pending_reviews = [review for review in reviews if not review['approved']]
+
+                logger.info(f"Найдено {len(pending_reviews)} отзывов для модерации")
 
                 if not pending_reviews:
                     await send_message(update, context, "Нет отзывов для модерации.",
@@ -351,7 +379,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     return
 
                 for i, review in enumerate(pending_reviews):
-                    review_text = f"{i + 1}. {review['review']} - На рассмотрении"
+                    review_text = (
+                        f"{i + 1}. {review['review']} - {'Одобрено' if review['approved'] else 'На рассмотрении'}\n"
+                        f"Автор: {review['user_name']} (ID: {review['user_id']})"
+                    )
+                    logger.info(f"Отображаем отзыв для модерации: {review_text}")
+
+                    if 'photo_file_ids' in review:
+                        logger.info(f"Отзыв содержит {len(review['photo_file_ids'])} фото")
+                        media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
+                        await context.bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
+
                     buttons = [
                         [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
                          InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
@@ -362,224 +400,263 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 context.user_data['state'] = 'moderation_menu'
                 return
 
-        elif user_state == 'moderation_menu':
-            if update.message.text.strip() == 'Админ меню':
-                context.user_data['state'] = 'admin_menu'
-                menu = MENU_TREE['admin_menu']
+            # Обработка состояния "Отзывы💬"
+            if user_state == 'reviews_menu':
+                if update.message.text.strip() in MENU_TREE['reviews_menu']['next_state']:
+                    context.user_data['state'] = MENU_TREE['reviews_menu']['next_state'][update.message.text.strip()]
+                    next_menu = MENU_TREE.get(context.user_data['state'])
+                    await send_message(update, context, next_menu['message'], next_menu['options'])
+                else:
+                    await send_message(update, context, "Пожалуйста, выберите опцию из меню.",
+                                       MENU_TREE['reviews_menu']['options'])
+                return
+
+            # Обработка стандартных состояний
+            menu = MENU_TREE.get(user_state)
+            user_choice = update.message.text.strip()
+
+            if user_choice == 'В начало🔙':
+                context.user_data['state'] = 'main_menu'
+                menu = MENU_TREE['main_menu']
                 await send_message(update, context, menu['message'], menu['options'])
                 return
 
-    # Обработка модерации отзывов
-    if user_state == 'moderation_menu':
-        reviews = context.application.bot_data.get('reviews', [])
-        pending_reviews = [review for review in reviews if not review.get('approved', False)]
-
-        logger.info(f"Найдено {len(pending_reviews)} отзывов для модерации")
-
-        if not pending_reviews:
-            await send_message(update, context, "Нет отзывов для модерации.",
-                               MENU_TREE['admin_menu']['options'])
-            context.user_data['state'] = 'admin_menu'
-            return
-
-        for i, review in enumerate(pending_reviews):
-            review_text = (
-                f"{i + 1}. {review['review']} - {'Одобрено' if review.get('approved', False) else 'На рассмотрении'}\n"
-                f"Автор: {review['user_name']} (ID: {review['user_id']})"
-            )
-            logger.info(f"Отображаем отзыв для модерации: {review_text}")
-
-            if 'photo_file_ids' in review:
-                logger.info(f"Отзыв содержит {len(review['photo_file_ids'])} фото")
-                media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
-                await context.bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
-
-            buttons = [
-                [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                 InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
-            ]
-            reply_markup = InlineKeyboardMarkup(buttons)
-            await update.message.reply_text(review_text, reply_markup=reply_markup)
-
-        context.user_data['state'] = 'moderation_menu'
-        return
-
-    # Обработка состояния "Отзывы💬"
-    if user_state == 'reviews_menu':
-        if update.message.text.strip() in MENU_TREE['reviews_menu']['next_state']:
-            context.user_data['state'] = MENU_TREE['reviews_menu']['next_state'][update.message.text.strip()]
-            next_menu = MENU_TREE.get(context.user_data['state'])
-            await send_message(update, context, next_menu['message'], next_menu['options'])
-        else:
-            await send_message(update, context, "Пожалуйста, выберите опцию из меню.",
-                               MENU_TREE['reviews_menu']['options'])
-        return
-
-    # Если пользователь не администратор, обрабатываем обычные состояния
-    menu = MENU_TREE.get(user_state)
-    user_choice = update.message.text.strip()
-
-    if user_choice == 'В начало🔙':
-        context.user_data['state'] = 'main_menu'
-        menu = MENU_TREE['main_menu']
-        await send_message(update, context, menu['message'], menu['options'])
-        return
-
-    # Обработка выбора тарифа в Калькуляторе🧮
-    if user_state == 'calculator_menu' and user_choice in CLEANING_PRICES:
-        context.user_data['selected_tariff'] = user_choice
-        if user_choice == 'Мытье окон🧴':
-            context.user_data['state'] = 'enter_window_panels'
-            await send_message(update, context, MENU_TREE['enter_window_panels']['message'],
-                               MENU_TREE['enter_window_panels']['options'])
-        else:
-            context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
-            context.user_data['state'] = 'enter_square_meters'
-            await send_message(update, context, MENU_TREE['enter_square_meters']['message'],
-                               MENU_TREE['enter_square_meters']['options'])
-        return
-
-    # Обработка выбора тарифа в меню "Тарифы🏷️"
-    if user_state == 'show_tariffs' and user_choice in CLEANING_PRICES:
-        details = CLEANING_DETAILS.get(user_choice)
-        if details:
-            try:
-                with open(details['image_path'], 'rb') as image_file:
-                    await update.message.reply_photo(photo=image_file)
-            except FileNotFoundError:
-                logger.error(f"Изображение не найдено: {details['image_path']}")
-                await update.message.reply_text("Изображение для этого тарифа временно недоступно.")
-
-            context.user_data['selected_tariff'] = user_choice
-            context.user_data['state'] = f'detail_{user_choice}'
-
-            for part in details['details_text']:
-                await update.message.reply_text(part)
-
-            await send_message(update, context, "Выберите дальнейшее действие:",
-                               MENU_TREE[f'detail_{user_choice}']['options'])
-        else:
-            await send_message(update, context, "Пожалуйста, выберите опцию из меню.",
-                               MENU_TREE['show_tariffs']['options'])
-        return
-
-    # Обработка перехода в калькулятор внутри меню тарифа
-    if user_state.startswith('detail_') and user_choice == 'Калькулятор🧮':
-        tariff_name = user_state.split('_')[1]
-        context.user_data['selected_tariff'] = tariff_name
-
-        if tariff_name == 'Мытье окон🧴':
-            context.user_data['state'] = 'enter_window_panels'
-            await send_message(update, context, "Введите количество оконных створок:", ['В начало🔙'])
-        else:
-            context.user_data['price_per_sqm'] = CLEANING_PRICES[tariff_name]
-            context.user_data['state'] = 'enter_square_meters'
-            await send_message(update, context, MENU_TREE['enter_square_meters']['message'],
-                               MENU_TREE['enter_square_meters']['options'])
-        return
-
-    # Обработка ввода квадратных метров или количества оконных створок
-    if user_state == 'enter_square_meters':
-        try:
-            sqm = float(user_choice)
-            price_per_sqm = context.user_data.get('price_per_sqm')
-            if price_per_sqm is None:
-                await send_message(update, context,
-                                   'Произошла ошибка. Пожалуйста, вернитесь в главное меню и начните заново.',
-                                   ['В начало🔙'])
-                context.user_data['state'] = 'main_menu'
+            # Обработка выбора тарифа в Калькуляторе🧮
+            if user_state == 'calculator_menu' and user_choice in CLEANING_PRICES:
+                context.user_data['selected_tariff'] = user_choice
+                if user_choice == 'Мытье окон🧴':
+                    context.user_data['state'] = 'enter_window_panels'
+                    await send_message(update, context, MENU_TREE['enter_window_panels']['message'],
+                                       MENU_TREE['enter_window_panels']['options'])
+                else:
+                    context.user_data['price_per_sqm'] = CLEANING_PRICES[user_choice]
+                    context.user_data['state'] = 'enter_square_meters'
+                    await send_message(update, context, MENU_TREE['enter_square_meters']['message'],
+                                       MENU_TREE['enter_square_meters']['options'])
                 return
 
-            result = calculate(price_per_sqm, sqm)
-            await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
-            context.user_data['state'] = 'main_menu'
-        except ValueError:
-            await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.',
-                               menu['options'])
-        return
+            # Обработка выбора тарифа в меню "Тарифы🏷️"
+            if user_state == 'show_tariffs' and user_choice in CLEANING_PRICES:
+                details = CLEANING_DETAILS.get(user_choice)
+                if details:
+                    try:
+                        with open(details['image_path'], 'rb') as image_file:
+                            await update.message.reply_photo(photo=image_file)
+                    except FileNotFoundError:
+                        logger.error(f"Изображение не найдено: {details['image_path']}")
+                        await update.message.reply_text("Изображение для этого тарифа временно недоступно.")
 
-    # Обработка ввода количества оконных створок для тарифа "мытье окон"
-    if user_state == 'enter_window_panels':
-        try:
-            num_panels = int(user_choice)
-            price_per_panel = CLEANING_PRICES['Мытье окон🧴']
+                    context.user_data['selected_tariff'] = user_choice
+                    context.user_data['state'] = f'detail_{user_choice}'
 
-            result = calculate_windows(price_per_panel, num_panels)
+                    for part in details['details_text']:
+                        await update.message.reply_text(part)
 
-            await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
-            context.user_data['state'] = 'main_menu'
-        except ValueError:
-            await send_message(update, context, 'Пожалуйста, введите корректное количество оконных створок.',
-                               ['В начало🔙'])
-        return
+                    await send_message(update, context, "Выберите дальнейшее действие:",
+                                       MENU_TREE[f'detail_{user_choice}']['options'])
+                else:
+                    await send_message(update, context, "Пожалуйста, выберите опцию из меню.",
+                                       MENU_TREE['show_tariffs']['options'])
+                return
 
-    # Обработка перехода в меню "Связаться📞"
-    if user_state == 'main_menu' and user_choice == 'Связаться📞':
-        context.user_data['state'] = 'contact'
+            # Обработка перехода в калькулятор внутри меню тарифа
+            if user_state.startswith('detail_') and user_choice == 'Калькулятор🧮':
+                tariff_name = user_state.split('_')[1]
+                context.user_data['selected_tariff'] = tariff_name
 
-        buttons = [
-            [InlineKeyboardButton("WhatsApp", url="https://wa.me/79956124581")],
-            [InlineKeyboardButton("Telegram", url="https://t.me/kaliroom")],
-            [InlineKeyboardButton("Показать номер", callback_data="show_phone_number")]
-        ]
-        await send_inline_message(update, context, MENU_TREE['contact']['message'], buttons)
+                if tariff_name == 'Мытье окон🧴':
+                    context.user_data['state'] = 'enter_window_panels'
+                    await send_message(update, context, "Введите количество оконных створок:", ['В начало🔙'])
+                else:
+                    context.user_data['price_per_sqm'] = CLEANING_PRICES[tariff_name]
+                    context.user_data['state'] = 'enter_square_meters'
+                    await send_message(update, context, MENU_TREE['enter_square_meters']['message'],
+                                       MENU_TREE['enter_square_meters']['options'])
+                return
 
-        reply_keyboard = [['В начало🔙']]
-        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
-        await update.message.reply_text("Вернуться в главное меню:", reply_markup=reply_markup)
-        return
+            # Обработка ввода квадратных метров или количества оконных створок
+            if user_state == 'enter_square_meters':
+                try:
+                    sqm = float(user_choice)
+                    price_per_sqm = context.user_data.get('price_per_sqm')
+                    if price_per_sqm is None:
+                        await send_message(update, context,
+                                           'Произошла ошибка. Пожалуйста, вернитесь в главное меню и начните заново.',
+                                           ['В начало🔙'])
+                        context.user_data['state'] = 'main_menu'
+                        return
 
-    if user_choice in menu['next_state']:
-        next_state = menu['next_state'][user_choice]
-        context.user_data['state'] = next_state
+                    result = calculate(price_per_sqm, sqm)
+                    await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
+                    context.user_data['state'] = 'main_menu'
+                except ValueError:
+                    await send_message(update, context, 'Пожалуйста, введите корректное количество квадратных метров.',
+                                       menu['options'])
+                return
 
-        if next_state == 'enter_square_meters':
-            context.user_data['selected_tariff'] = user_choice  # Запоминаем выбранный тариф
-        next_menu = MENU_TREE.get(next_state)
-        if next_menu:
-            await send_message(update, context, next_menu['message'], next_menu['options'])
-    else:
-        await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'), menu['options'])
+            # Обработка ввода количества оконных створок для тарифа "Мытье окон"
+            if user_state == 'enter_window_panels':
+                try:
+                    num_panels = int(user_choice)
+                    price_per_panel = CLEANING_PRICES['Мытье окон🧴']
 
+                    result = calculate_windows(price_per_panel, num_panels)
 
+                    await send_message(update, context, result['formatted_message'], MENU_TREE['calculate_result']['options'])
+                    context.user_data['state'] = 'main_menu'
+                except ValueError:
+                    await send_message(update, context, 'Пожалуйста, введите корректное количество оконных створок.',
+                                       ['В начало🔙'])
+                return
+
+            # Обработка перехода в меню "Связаться📞"
+            if user_state == 'main_menu' and user_choice == 'Связаться📞':
+                context.user_data['state'] = 'contact'
+
+                buttons = [
+                    [InlineKeyboardButton("WhatsApp", url="https://wa.me/79956124581")],
+                    [InlineKeyboardButton("Telegram", url="https://t.me/kaliroom")],
+                    [InlineKeyboardButton("Показать номер", callback_data="show_phone_number")]
+                ]
+                await send_inline_message(update, context, MENU_TREE['contact']['message'], buttons)
+
+                reply_keyboard = [['В начало🔙']]
+                reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+                await update.message.reply_text("Вернуться в главное меню:", reply_markup=reply_markup)
+                return
+
+            # Обработка переходов между состояниями
+            if user_choice in menu['next_state']:
+                next_state = menu['next_state'][user_choice]
+                context.user_data['state'] = next_state
+
+                if next_state == 'enter_square_meters':
+                    context.user_data['selected_tariff'] = user_choice  # Запоминаем выбранный тариф
+                next_menu = MENU_TREE.get(next_state)
+                if next_menu:
+                    await send_message(update, context, next_menu['message'], next_menu['options'])
+            else:
+                await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'),
+                                   menu['options'])
+
+    except Exception as e:
+        logger.error(f"Ошибка при обработке сообщения: {e}")
+        await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
 # Функция для публикации отзывов в канал
-async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
+async def publish_review(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    # Извлечение ID отзыва из callback_data
     try:
-        # Отправляем текст отзыва в канал
-        if review.get('review'):
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
+        review_id = query.data.split('_')[1]
+    except IndexError:
+        await query.edit_message_text(text="Ошибка: неправильный формат данных.")
+        return
 
-        # Проверяем и отправляем фотографии отзыва в канал
-        photo_file_ids = review.get('photo_file_ids', [])
-        if photo_file_ids:
-            media_group = [InputMediaPhoto(photo_id) for photo_id in photo_file_ids]
-            await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
-        else:
-            logger.warning("Отзыв не содержит фотографий для публикации.")
+    reviews = context.bot_data.get('reviews', [])
 
-        review['approved'] = True
-        logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
-    except telegram.error.TelegramError as e:
-        logger.error(f"Ошибка при публикации отзыва: {e}")
-    except Exception as e:
-        logger.error(f"Произошла непредвиденная ошибка: {e}")
+    # Поиск отзыва по его уникальному идентификатору
+    review = next((r for r in reviews if r['id'] == review_id), None)
+
+    if not review:
+        await query.edit_message_text(text="Ошибка: отзыв не найден.")
+        return
+
+    # Публикация на канал
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,  # Отправляем сообщение в текущий чат администратора
+        text=f"Новый отзыв от {review['user_name']}:\n\n{review['review']}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Опубликовать✅", callback_data=f"publish_{review['id']}"),
+             InlineKeyboardButton("Удалить🗑️", callback_data=f"delete_{review['id']}")]
+        ])
+    )
+
+    # Отправка фотографий, если они есть
+    if review.get('photo_file_ids'):
+        media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
+        await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+
+
+
+    # Пометка отзыва как опубликованного
+    review['approved'] = True
+    context.bot_data['reviews'] = reviews
+
+    await query.edit_message_text(text="Отзыв опубликован.")
+
 
 # Функция, которая обрабатывает нажатие кнопки публикации отзыва
-async def handle_publish_review(update: Update, context: CallbackContext, ADMIN_ID=None):
+async def handle_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        callback_data = update.callback_query.data
+        review_id = callback_data.split('_')[1]  # Извлечение уникального идентификатора из callback_data
+        pending_reviews = context.application.bot_data.get('reviews', [])
+
+        # Поиск отзыва по его уникальному идентификатору
+        review = next((r for r in pending_reviews if r['id'] == review_id), None)
+
+        if review:
+            # Обновление статуса отзыва на "одобрен"
+            review['approved'] = True
+
+            # Логирование для проверки
+            logger.info(f"Отзыв {review_id} успешно опубликован: {review['review']}")
+
+            await send_message(update, context, "Отзыв успешно опубликован.")
+        else:
+            logger.warning(f"Не удалось найти отзыв с ID {review_id}.")
+            await send_message(update, context, "Не удалось найти отзыв для публикации.")
+
+    except Exception as e:
+        logger.error(f"Ошибка при публикации отзыва: {e}")
+        await update.callback_query.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
+
+async def delete_review(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    review_id = extract_review_id(query.data)  # Извлекаем ID отзыва из данных кнопки
-    review = get_review_by_id(review_id)  # Получаем отзыв по его ID
+    await query.answer()
 
-    if review:
-        await publish_review(context, review)  # Публикуем отзыв с использованием основной функции
-        mark_review_as_published(review_id)  # Обновляем статус отзыва в базе данных
-        await query.answer("Отзыв успешно опубликован!")
+    # Извлечение индекса отзыва из callback_data
+    review_index = int(query.data.split('_')[1])
+
+    # Получение списка отзывов
+    reviews = context.bot_data.get('reviews', [])
+
+    # Проверка, что индекс в допустимом диапазоне
+    if 0 <= review_index < len(reviews):
+        deleted_review = reviews.pop(review_index)  # Удаление отзыва из списка
+        context.bot_data['reviews'] = reviews  # Обновление списка в bot_data
+
+        # Сообщение об успешном удалении
+        await query.edit_message_text(text=f"Отзыв '{deleted_review['review']}' удален.")
     else:
-        await query.answer("Ошибка: отзыв не найден.")
+        await query.edit_message_text(text="Ошибка: отзыв не найден.")
 
-    # Отправляем сообщение администратору об окончании обработки всех отзывов
-    await context.bot.send_message(chat_id=ADMIN_ID, text="Все отзывы обработаны.")
+async def process_pending_reviews(context: ContextTypes.DEFAULT_TYPE, chat_id):
+    reviews = context.application.bot_data.get('reviews', [])
+    pending_reviews = [review for review in reviews if not review.get('approved', False)]
+
+    if not pending_reviews:
+        await context.bot.send_message(chat_id=chat_id, text="Все отзывы обработаны.")
+        reply_keyboard = [['Админ меню']]
+        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+        await context.bot.send_message(chat_id=chat_id, text="Вернуться в админ меню:", reply_markup=reply_markup)
+        return
+
+    for i, review in enumerate(pending_reviews):
+        review_text = f"{i + 1}. {review['review']} - На рассмотрении"
+
+        # Создание кнопок для публикации и удаления
+        buttons = [
+            [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
+             InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
+        ]
+        reply_markup = InlineKeyboardMarkup(buttons)
+
+        # Отправка сообщения администратору с кнопками
+        await context.bot.send_message(chat_id=chat_id, text=review_text, reply_markup=reply_markup)
 
 # Обновленная функция для обработки нажатий на inline-кнопки
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -587,52 +664,52 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         query = update.callback_query
         await query.answer()
 
-        user_state = context.user_data.get('state', 'main_menu')
-        reviews = context.application.bot_data.get('reviews', [])
+        async with review_lock:  # Блокируем доступ к отзывам
+            user_state = context.user_data.get('state', 'main_menu')
+            reviews = context.application.bot_data.get('reviews', [])
 
-        if query.data == "show_phone_number":
-            phone_number = "+7 (995) 612-45-81"
-            await query.edit_message_text(text=f"Номер телефона: {phone_number}")
-            return
+            # Обработка показа номера телефона
+            if query.data == "show_phone_number":
+                phone_number = "+7 (995) 612-45-81"
+                await query.edit_message_text(text=f"Номер телефона: {phone_number}")
+                return
 
-        if user_state == 'moderation_menu' and query.data.startswith('publish_'):
-            review_index = int(query.data.split('_')[1])
+            # Обработка модерации отзывов
+            if user_state == 'moderation_menu':
+                await process_pending_reviews(context, query.message.chat_id)
+
+            # Обработка удаления отзыва
+            elif query.data.startswith('delete_'):
+                review_index = int(query.data.split('_')[1])
+                pending_reviews = [review for review in reviews if not review.get('approved', False)]
+
+                if 0 <= review_index < len(pending_reviews):
+                    removed_review = pending_reviews.pop(review_index)  # Удаляем отзыв из списка
+                    context.application.bot_data['reviews'] = pending_reviews  # Обновляем список отзывов
+                    await query.edit_message_text(text=f"Отзыв '{removed_review['review']}' был безвозвратно удален.")
+
+            # Перепроверка оставшихся отзывов для модерации
             pending_reviews = [review for review in reviews if not review.get('approved', False)]
-            if 0 <= review_index < len(pending_reviews):
-                review = pending_reviews[review_index]
-                await publish_review(context, review)  # Публикуем отзыв через новую функцию
-                await query.edit_message_text(text="Отзыв успешно опубликован.")
 
-        elif query.data.startswith('delete_'):
-            review_index = int(query.data.split('_')[1])
-            pending_reviews = [review for review in reviews if not review.get('approved', False)]
-            if 0 <= review_index < len(pending_reviews):
-                reviews.remove(pending_reviews[review_index])
-                await query.edit_message_text(text="Отзыв безвозвратно удален.")
-
-        # Перепроверка оставшихся отзывов для модерации
-        pending_reviews = [review for review in reviews if not review.get('approved', False)]
-
-        if not pending_reviews:
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
-            reply_keyboard = [['Админ меню']]
-            reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Вернуться в админ меню:",
-                                           reply_markup=reply_markup)
-        else:
-            for i, review in enumerate(pending_reviews):
-                review_text = f"{i + 1}. {review['review']} - На рассмотрении"
-                buttons = [
-                    [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                     InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
-                ]
-                reply_markup = InlineKeyboardMarkup(buttons)
-                await context.bot.send_message(chat_id=query.message.chat_id, text=review_text,
+            if not pending_reviews:
+                await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
+                reply_keyboard = [['Админ меню']]
+                reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+                await context.bot.send_message(chat_id=query.message.chat_id, text="Вернуться в админ меню:",
                                                reply_markup=reply_markup)
-
+            else:
+                for i, review in enumerate(pending_reviews):
+                    review_text = f"{i + 1}. {review['review']} - На рассмотрении"
+                    buttons = [
+                        [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
+                         InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(buttons)
+                    await context.bot.send_message(chat_id=query.message.chat_id, text=review_text,
+                                                   reply_markup=reply_markup)
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
-
+        await query.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -709,6 +786,12 @@ def main():
     TOKEN = '7363733923:AAHKPw_fvjG2F3PBE2XP6Sj49u04uy7wpZE'
 
     application = Application.builder().token(TOKEN).build()
+
+    # Обработчик для публикации отзыва
+    application.add_handler(CallbackQueryHandler(publish_review, pattern=r'^publish_\d+$'))
+
+    # Обработчик для удаления отзыва
+    application.add_handler(CallbackQueryHandler(delete_review, pattern=r'^delete_\d+$'))
 
     # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", start))
