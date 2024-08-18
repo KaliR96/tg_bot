@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import requests
+from telegram.ext import CallbackContext
 import httpx
 import logging
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
@@ -16,6 +16,8 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# ID вашего канала
+CHANNEL_ID = -1002249882445
 # Укажите ваш Telegram ID
 ADMIN_ID = 1238802718  # Замените на ваш реальный Telegram ID
 
@@ -179,6 +181,21 @@ MENU_TREE = {
     }
 }
 
+# Вставляем здесь вспомогательные функции:
+
+def extract_review_id(data: str) -> int:
+    # Пример: извлечение ID отзыва из строки данных
+    return int(data.split('_')[1])
+
+def get_review_by_id(review_id: int) -> dict:
+    # Пример: получение отзыва из базы данных по его ID
+    # Возвращаем словарь с данными отзыва
+    pass
+
+def mark_review_as_published(review_id: int) -> None:
+    # Пример: обновление состояния отзыва как опубликованного
+    pass
+
 # Динамическое добавление состояний для каждого тарифа с кнопкой "Калькулятор🧮"
 for tariff_name, details in CLEANING_DETAILS.items():
     MENU_TREE[f'detail_{tariff_name}'] = {
@@ -213,7 +230,6 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # Универсальная функция для обработки переходов между состояниями
-# Функция для обработки текстовых сообщений и фотографий
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
     user_state = context.user_data.get('state', 'main_menu')
@@ -526,10 +542,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'), menu['options'])
 
 
-# ID вашего канала
-CHANNEL_ID = -1002249882445
 
-# Функция для обработки нажатий на inline-кнопки
 # Функция для публикации отзывов в канал
 async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
     try:
@@ -537,19 +550,36 @@ async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> No
         if review.get('review'):
             await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
 
-        # Логируем начало отправки фото
-        logger.info(f"Начинаю отправку {len(review.get('photo_file_ids', []))} фото")
-
-        # Отправляем фотографии отзыва в канал
-        if review.get('photo_file_ids'):
-            media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
+        # Проверяем и отправляем фотографии отзыва в канал
+        photo_file_ids = review.get('photo_file_ids', [])
+        if photo_file_ids:
+            media_group = [InputMediaPhoto(photo_id) for photo_id in photo_file_ids]
             await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+        else:
+            logger.warning("Отзыв не содержит фотографий для публикации.")
 
         review['approved'] = True
         logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
-    except Exception as e:
+    except telegram.error.TelegramError as e:
         logger.error(f"Ошибка при публикации отзыва: {e}")
+    except Exception as e:
+        logger.error(f"Произошла непредвиденная ошибка: {e}")
 
+# Функция, которая обрабатывает нажатие кнопки публикации отзыва
+async def handle_publish_review(update: Update, context: CallbackContext, ADMIN_ID=None):
+    query = update.callback_query
+    review_id = extract_review_id(query.data)  # Извлекаем ID отзыва из данных кнопки
+    review = get_review_by_id(review_id)  # Получаем отзыв по его ID
+
+    if review:
+        await publish_review(context, review)  # Публикуем отзыв с использованием основной функции
+        mark_review_as_published(review_id)  # Обновляем статус отзыва в базе данных
+        await query.answer("Отзыв успешно опубликован!")
+    else:
+        await query.answer("Ошибка: отзыв не найден.")
+
+    # Отправляем сообщение администратору об окончании обработки всех отзывов
+    await context.bot.send_message(chat_id=ADMIN_ID, text="Все отзывы обработаны.")
 
 # Обновленная функция для обработки нажатий на inline-кнопки
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
