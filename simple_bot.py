@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
+import requests
+import httpx
 import logging
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+
 
 import telegram.error  # Добавляем этот импорт для доступа к telegram.error.Forbidden
 
@@ -527,6 +530,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 CHANNEL_ID = -1002249882445
 
 # Функция для обработки нажатий на inline-кнопки
+# Функция для публикации отзывов в канал
+async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
+    try:
+        # Отправляем текст отзыва в канал
+        if review.get('review'):
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
+
+        # Логируем начало отправки фото
+        logger.info(f"Начинаю отправку {len(review.get('photo_file_ids', []))} фото")
+
+        # Отправляем фотографии отзыва в канал
+        if review.get('photo_file_ids'):
+            media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
+            await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+
+        review['approved'] = True
+        logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
+    except Exception as e:
+        logger.error(f"Ошибка при публикации отзыва: {e}")
+
+
+# Обновленная функция для обработки нажатий на inline-кнопки
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         query = update.callback_query
@@ -536,7 +561,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         reviews = context.application.bot_data.get('reviews', [])
 
         if query.data == "show_phone_number":
-            phone_number = "+7 (995) 612-45-81"  # Укажите нужный номер телефона
+            phone_number = "+7 (995) 612-45-81"
             await query.edit_message_text(text=f"Номер телефона: {phone_number}")
             return
 
@@ -545,23 +570,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             pending_reviews = [review for review in reviews if not review.get('approved', False)]
             if 0 <= review_index < len(pending_reviews):
                 review = pending_reviews[review_index]
-                try:
-                    review_info = (
-                        f"Отзыв от {review['user_name']} (ID: {review['user_id']}) будет опубликован.\n"
-                        f"Текст отзыва: {review['review']}"
-                    )
-                    await context.bot.send_message(chat_id=ADMIN_ID, text=review_info)
-
-                    await context.bot.forward_message(
-                        chat_id=CHANNEL_ID,
-                        from_chat_id=review['user_id'],
-                        message_id=review['message_id']
-                    )
-                    review['approved'] = True
-                    await query.edit_message_text(text="Отзыв успешно опубликован.")
-                except telegram.error.Forbidden as e:
-                    logger.error(f"Не удалось переслать сообщение в канал: {e}")
-                    await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
+                await publish_review(context, review)  # Публикуем отзыв через новую функцию
+                await query.edit_message_text(text="Отзыв успешно опубликован.")
 
         elif query.data.startswith('delete_'):
             review_index = int(query.data.split('_')[1])
@@ -570,7 +580,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 reviews.remove(pending_reviews[review_index])
                 await query.edit_message_text(text="Отзыв безвозвратно удален.")
 
-        reviews = context.application.bot_data.get('reviews', [])
+        # Перепроверка оставшихся отзывов для модерации
         pending_reviews = [review for review in reviews if not review.get('approved', False)]
 
         if not pending_reviews:
@@ -592,26 +602,46 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
+
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = update.message.from_user
-        photo_file = await update.message.photo[-1].get_file()  # Добавлено await
-        file_path = f"{user.id}_photo.jpg"
-        await photo_file.download(file_path)  # Добавлено await
-        logging.info(f"Received photo from {user.first_name}, saved to {file_path}")
+        photo_file = await update.message.photo[-1].get_file()
+        file_url = photo_file.file_path
 
-        # Отправляем фото администратору
-        admin_chat_id = "ID_администратора"  # Замените на реальный chat_id администратора
-        await context.bot.send_photo(chat_id=admin_chat_id, photo=open(file_path, 'rb'),
-                                     caption=f"Новый отзыв от {user.first_name} (@{user.username})")
+        # Скачиваем файл вручную с помощью httpx
+        file_name = f"{user.id}_photo.jpg"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(file_url)
+            with open(file_name, 'wb') as f:
+                f.write(response.content)
+
+        logging.info(f"Received photo from {user.first_name}, saved to {file_name}")
+
+        # Отправляем фото и текст отзыва администратору
+        admin_chat_id = ADMIN_ID
+        with open(file_name, 'rb') as photo:
+            # Отправляем фото
+            sent_message = await context.bot.send_photo(chat_id=admin_chat_id, photo=photo,
+                                                        caption=f"Новый отзыв от {user.first_name} (@{user.username})")
+
+            # Добавляем inline-кнопки для модерации после отправки фото
+            buttons = [
+                [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{sent_message.message_id}'),
+                 InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{sent_message.message_id}')]
+            ]
+            reply_markup = InlineKeyboardMarkup(buttons)
+
+            await context.bot.send_message(chat_id=admin_chat_id, text="Выберите действие для этого отзыва:",
+                                           reply_markup=reply_markup)
 
         # Отправляем подтверждение пользователю
-        await update.message.reply_text("Спасибо за ваш отзыв! Он будет добавлен через некоторое время.")  # Добавлено await
+        await update.message.reply_text("Спасибо за ваш отзыв! Он будет добавлен через некоторое время.")
         logging.info("Confirmation message sent.")
     except Exception as e:
         logging.error(f"Error handling photo: {e}")
-        await update.message.reply_text("Произошла ошибка при обработке вашего отзыва. Попробуйте еще раз.")  # Д
-
+        await update.message.reply_text("Произошла ошибка при обработке вашего отзыва. Попробуйте еще раз.")
 
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
@@ -664,6 +694,7 @@ def main():
 
     logger.info("Бот успешно запущен, начало polling...")
     application.run_polling()
+
 
 if __name__ == '__main__':
     main()
