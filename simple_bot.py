@@ -8,14 +8,12 @@ from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKe
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 
-import telegram.error  # Добавляем этот импорт для доступа к telegram.error.Forbidden
-
+import telegram.error
 review_lock = asyncio.Lock()
 
-# Настраиваем логирование на уровне DEBUG
+
 import logging
 
-# Настраиваем логирование
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -26,9 +24,9 @@ logger = logging.getLogger(__name__)
 # ID вашего канала
 CHANNEL_ID = -1002249882445
 # Укажите ваш Telegram ID
-ADMIN_ID = 1238802718  # Замените на ваш реальный Telegram ID
+ADMIN_ID = 1238802718
 
-# Цены на квадратный метр для каждого типа уборки
+
 CLEANING_PRICES = {
     'Ген.Уборка🧼': 125,
     'Повседневная🧹': 75,
@@ -36,7 +34,7 @@ CLEANING_PRICES = {
     'Мытье окон🧴': 350
 }
 
-# Пути к изображениям и текст для каждого тарифа
+
 CLEANING_DETAILS = {
     'Ген.Уборка🧼': {
         'image_path': r'C:\Users\travo\Desktop\tg_bot\img\general.jpg',
@@ -74,7 +72,7 @@ CLEANING_DETAILS = {
     }
 }
 
-# Определение дерева меню
+
 MENU_TREE = {
     'main_menu': {
         'message': 'Привет! Я Вера, твоя фея чистоты.\n\nМой робот-уборщик поможет:\n\n🔍Ознакомиться с моими услугами\n\n🧮Рассчитать стоимость уборки\n\n🚗Заказать клининг на дом\n\n📞Связаться со мной.',
@@ -187,11 +185,29 @@ MENU_TREE = {
         }
     }
 }
+def add_review(context, user_name, review_text, photo_file_ids):
+    reviews = context.bot_data.get('reviews', [])
+    review_id = str(uuid.uuid4())  # Генерация уникального идентификатора
+    review = {
+        'id': review_id,  # Присваиваем уникальный ID
+        'user_name': user_name,
+        'review': review_text,
+        'photo_file_ids': photo_file_ids,
+        'approved': False
+    }
+    reviews.append(review)
+    context.bot_data['reviews'] = reviews
 
-# Вставляем здесь вспомогательные функции:
 def extract_review_id(data: str) -> int:
-    # Пример: извлечение ID отзыва из строки данных
-    return int(data.split('_')[1])
+    try:
+        # Пример: извлечение ID отзыва из строки данных
+        review_id = int(data.split('_')[1])
+        logger.debug(f"Извлечен ID отзыва: {review_id}")
+        return review_id
+    except (IndexError, ValueError) as e:
+        logger.error(f"Ошибка при извлечении ID отзыва из строки '{data}': {e}")
+        return None
+
 
 def get_review_by_id(review_id: int, reviews: list) -> dict:
     # Поиск отзыва по ID в списке отзывов
@@ -210,18 +226,6 @@ def mark_review_as_published(review_id: int, reviews: list) -> bool:
     return False
 
 
-def add_review(context, user_name, review_text, photo_file_ids):
-    reviews = context.bot_data.get('reviews', [])
-    review_id = str(uuid.uuid4())  # Генерация уникального идентификатора
-    review = {
-        'id': review_id,  # Присваиваем уникальный ID
-        'user_name': user_name,
-        'review': review_text,
-        'photo_file_ids': photo_file_ids,
-        'approved': False
-    }
-    reviews.append(review)
-    context.bot_data['reviews'] = reviews
 
 
 # Динамическое добавление состояний для каждого тарифа с кнопкой "Калькулятор🧮"
@@ -555,53 +559,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # Функция для публикации отзывов в канал
 
-async def publish_review(update: Update, context: CallbackContext) -> None:
+async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
     try:
-        callback_data = update.callback_query.data
-        review_id = callback_data.split('_')[1]  # Извлечение идентификатора отзыва из callback_data
+        # Отправляем текст отзыва в канал
+        if 'review' in review:
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
+            logger.debug(f"Текст отзыва отправлен: {review['review']}")
 
-        # Логирование идентификатора
-        logger.debug(f"Получен review_id: {review_id}")
+        # Логируем начало отправки фото
+        logger.info(f"Начинаю отправку {len(review.get('photo_file_ids', []))} фото")
 
-        # Поиск отзыва по его уникальному идентификатору
-        reviews = context.bot_data.get('reviews', [])
-        logger.debug(f"Отзывы в системе: {reviews}")
-
-        review = get_review_by_id(review_id, reviews)
-
-        if review is None:
-            await update.callback_query.message.reply_text("Отзыв не найден или некорректный.")
-            return
-
-        # Публикация на канал
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,  # Отправляем сообщение в текущий чат администратора
-            text=f"Новый отзыв от {review['user_name']}:\n\n{review['review']}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Опубликовать✅", callback_data=f"publish_{review['id']}"),
-                 InlineKeyboardButton("Удалить🗑️", callback_data=f"delete_{review['id']}")]
-            ])
-        )
-
+        # Отправляем фотографии отзыва в канал
         if review.get('photo_file_ids'):
             media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
             await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+            logger.debug(f"Фотографии успешно отправлены в канал.")
 
-        # Обновление состояния отзыва как опубликованного
-        if mark_review_as_published(review_id, reviews):
-            context.bot_data['reviews'] = reviews
-            await update.callback_query.message.reply_text("Отзыв успешно опубликован.")
-        else:
-            await update.callback_query.message.reply_text("Ошибка: не удалось обновить статус отзыва.")
-
-    except KeyError as e:
-        logger.error(f"Ошибка при публикации отзыва: отсутствует ключ {e}")
-        await update.callback_query.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
-
+        logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
     except Exception as e:
-        logger.error(f"Неизвестная ошибка: {e}")
-        await update.callback_query.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
-
+        logger.error(f"Ошибка при публикации отзыва: {e}")
+        await context.bot.send_message(chat_id=ADMIN_ID, text=f"Произошла ошибка: {e}")
 
 # Функция, которая обрабатывает нажатие кнопки публикации отзыва
 async def handle_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -652,6 +629,7 @@ async def delete_review(update: Update, context: CallbackContext) -> None:
 async def process_pending_reviews(context: ContextTypes.DEFAULT_TYPE, chat_id):
     reviews = context.application.bot_data.get('reviews', [])
     pending_reviews = [review for review in reviews if not review.get('approved', False)]
+    logging.info(f"Найдено {len(pending_reviews)} необработанных отзывов.")
 
     if not pending_reviews:
         await context.bot.send_message(chat_id=chat_id, text="Все отзывы обработаны.")
@@ -665,70 +643,91 @@ async def process_pending_reviews(context: ContextTypes.DEFAULT_TYPE, chat_id):
 
         # Создание кнопок для публикации и удаления
         buttons = [
-            [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-             InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
+            [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{review["id"]}'),
+             InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{review["id"]}')]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
 
-        # Отправка сообщения администратору с кнопками
-        await context.bot.send_message(chat_id=chat_id, text=review_text, reply_markup=reply_markup)
+        # Проверка на наличие фото в отзыве
+        if review.get('photo_file_ids'):
+            for photo_id in review['photo_file_ids']:
+                await context.bot.send_photo(chat_id=chat_id, photo=photo_id, caption=review_text, reply_markup=reply_markup)
+                logging.info(f"Готов к публикации отзыв с фото: {review['review']}")
+        else:
+            # Отправка текстового отзыва администратору с кнопками
+            await context.bot.send_message(chat_id=chat_id, text=review_text, reply_markup=reply_markup)
+            logging.info(f"Готов к публикации текстовый отзыв: {review['review']}")
+
+    context.application.bot_data['reviews'] = reviews
+
 
 # Обновленная функция для обработки нажатий на inline-кнопки
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         query = update.callback_query
+        logger.debug(f"Получен callback_query: {query.data}")
         await query.answer()
 
-        async with review_lock:  # Блокируем доступ к отзывам
-            user_state = context.user_data.get('state', 'main_menu')
-            reviews = context.application.bot_data.get('reviews', [])
+        user_state = context.user_data.get('state', 'main_menu')
 
-            # Обработка показа номера телефона
-            if query.data == "show_phone_number":
-                phone_number = "+7 (995) 612-45-81"
-                await query.edit_message_text(text=f"Номер телефона: {phone_number}")
-                return
+        # Обрабатываем отзывы только в состоянии модерации
+        if user_state != 'moderation_menu':
+            await query.message.reply_text("Отзывы могут обрабатываться только в состоянии модерации.")
+            return
 
-            # Обработка модерации отзывов
-            if user_state == 'moderation_menu':
-                await process_pending_reviews(context, query.message.chat_id)
+        reviews = context.application.bot_data.get('reviews', [])
 
-            # Обработка удаления отзыва
+        # Извлечение ID отзыва из callback_data
+        review_id = query.data.split('_')[1]
+        logger.debug(f"Извлечен review_id: {review_id}")
+
+        review = get_review_by_id(review_id, reviews)
+
+        if review:
+            if query.data.startswith('publish_'):
+                review['approved'] = True
+                await publish_review(context, review)  # Публикуем отзыв через функцию publish_review
+                await query.edit_message_text(text="Отзыв успешно опубликован.")
+                logger.info(f"Отзыв с ID {review_id} успешно опубликован.")
+
             elif query.data.startswith('delete_'):
-                review_index = int(query.data.split('_')[1])
-                pending_reviews = [review for review in reviews if not review.get('approved', False)]
+                reviews.remove(review)
+                await query.edit_message_text(text="Отзыв безвозвратно удален.")
+                logger.info(f"Отзыв с ID {review_id} удален.")
 
-                if 0 <= review_index < len(pending_reviews):
-                    removed_review = pending_reviews.pop(review_index)  # Удаляем отзыв из списка
-                    context.application.bot_data['reviews'] = pending_reviews  # Обновляем список отзывов
-                    await query.edit_message_text(text=f"Отзыв '{removed_review['review']}' был безвозвратно удален.")
-
-            # Перепроверка оставшихся отзывов для модерации
-            pending_reviews = [review for review in reviews if not review.get('approved', False)]
-
+            # Обработка оставшихся отзывов
+            pending_reviews = [r for r in reviews if not r.get('approved', False)]
             if not pending_reviews:
                 await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
-                reply_keyboard = [['Админ меню']]
-                reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
-                await context.bot.send_message(chat_id=query.message.chat_id, text="Вернуться в админ меню:",
-                                               reply_markup=reply_markup)
+                logger.info("Все отзывы были обработаны.")
             else:
-                for i, review in enumerate(pending_reviews):
-                    review_text = f"{i + 1}. {review['review']} - На рассмотрении"
+                for i, r in enumerate(pending_reviews):
+                    review_text = f"{i + 1}. {r['review']} - На рассмотрении"
                     buttons = [
-                        [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                         InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
+                        [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{r["id"]}'),
+                         InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{r["id"]}')]
                     ]
                     reply_markup = InlineKeyboardMarkup(buttons)
                     await context.bot.send_message(chat_id=query.message.chat_id, text=review_text,
                                                    reply_markup=reply_markup)
+
+        else:
+            await query.edit_message_text(text="Отзыв не найден.")
+            logger.warning(f"Отзыв с ID {review_id} не найден.")
+
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
-        await query.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
+        await query.message.reply_text("Произошла ошибка при обработке действия. Попробуйте снова.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = update.message.from_user
+
+        # Проверяем, что админ находится в режиме модерации
+        if context.user_data.get('state') != 'moderation_menu':
+            await update.message.reply_text("Отзывы могут быть отправлены только в состоянии модерации.")
+            return
+
         photo_file = await update.message.photo[-1].get_file()
         file_url = photo_file.file_path
 
@@ -802,22 +801,11 @@ def main():
 
     application = Application.builder().token(TOKEN).build()
 
-    # Обработчик для публикации отзыва
-    application.add_handler(CallbackQueryHandler(publish_review, pattern=r'^publish_\d+$'))
-
-    # Обработчик для удаления отзыва
-    application.add_handler(CallbackQueryHandler(delete_review, pattern=r'^delete_\d+$'))
-
-    # Добавляем обработчики команд
+    # Убираем отдельные обработчики для публикации и удаления
+    # Вместо этого все обрабатываем внутри `button_click`
     application.add_handler(CommandHandler("start", start))
-
-    # Добавляем обработчик текстовых сообщений
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Добавляем обработчик фотографий
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-    # Добавляем обработчик inline-кнопок
     application.add_handler(CallbackQueryHandler(button_click))
 
     logger.info("Бот успешно запущен, начало polling...")
