@@ -213,7 +213,6 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # Универсальная функция для обработки переходов между состояниями
-# Функция для обработки текстовых сообщений и фотографий
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
     user_state = context.user_data.get('state', 'main_menu')
@@ -256,12 +255,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                MENU_TREE['main_menu']['options'])
             context.user_data['state'] = 'main_menu'
             return
-
-        # Если есть фото, но нет текста, продолжаем ожидать текст
-        if 'photo_file_ids' in context.user_data:
-            await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
-            return
-
 
         # Если нет текста, но есть фото, продолжаем ожидать текст
         if 'photo_file_ids' in context.user_data:
@@ -529,27 +522,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ID вашего канала
 CHANNEL_ID = -1002249882445
 
-# Функция для обработки нажатий на inline-кнопки
 # Функция для публикации отзывов в канал
 async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
     try:
-        # Отправляем текст отзыва в канал
+        # Отправляем текст отзыва в канал, если он есть
         if review.get('review'):
             await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
 
-        # Логируем начало отправки фото
-        logger.info(f"Начинаю отправку {len(review.get('photo_file_ids', []))} фото")
-
-        # Отправляем фотографии отзыва в канал
-        if review.get('photo_file_ids'):
-            media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
+        # Отправляем фотографии отзыва в канал, если они есть
+        photo_ids = review.get('photo_file_ids', [])
+        if photo_ids:
+            media_group = [InputMediaPhoto(photo_id) for photo_id in photo_ids]
             await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
 
         review['approved'] = True
         logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
     except Exception as e:
         logger.error(f"Ошибка при публикации отзыва: {e}")
-
+        # Можно отправить сообщение администратору о неудачной публикации
+        await context.bot.send_message(chat_id=ADMIN_ID, text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
 
 # Обновленная функция для обработки нажатий на inline-кнопки
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -607,40 +598,18 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = update.message.from_user
-        photo_file = await update.message.photo[-1].get_file()
-        file_url = photo_file.file_path
+        photo_file_id = update.message.photo[-1].file_id  # Получаем ID файла фото
 
-        # Скачиваем файл вручную с помощью httpx
-        file_name = f"{user.id}_photo.jpg"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(file_url)
-            with open(file_name, 'wb') as f:
-                f.write(response.content)
+        # Сохраняем ID файла фото в user_data
+        if 'photo_file_ids' not in context.user_data:
+            context.user_data['photo_file_ids'] = []
+        context.user_data['photo_file_ids'].append(photo_file_id)
 
-        logging.info(f"Received photo from {user.first_name}, saved to {file_name}")
+        logging.info(f"Получено фото от {user.first_name} (ID: {user.id}). File ID: {photo_file_id}")
 
-        # Отправляем фото и текст отзыва администратору
-        admin_chat_id = ADMIN_ID
-        with open(file_name, 'rb') as photo:
-            # Отправляем фото
-            sent_message = await context.bot.send_photo(chat_id=admin_chat_id, photo=photo,
-                                                        caption=f"Новый отзыв от {user.first_name} (@{user.username})")
-
-            # Добавляем inline-кнопки для модерации после отправки фото
-            buttons = [
-                [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{sent_message.message_id}'),
-                 InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{sent_message.message_id}')]
-            ]
-            reply_markup = InlineKeyboardMarkup(buttons)
-
-            await context.bot.send_message(chat_id=admin_chat_id, text="Выберите действие для этого отзыва:",
-                                           reply_markup=reply_markup)
-
-        # Отправляем подтверждение пользователю
-        await update.message.reply_text("Спасибо за ваш отзыв! Он будет добавлен через некоторое время.")
-        logging.info("Confirmation message sent.")
+        await update.message.reply_text("Фото получено! Пожалуйста, введите текст отзыва или подтвердите отправку.")
     except Exception as e:
-        logging.error(f"Error handling photo: {e}")
+        logging.error(f"Ошибка при обработке фото: {e}")
         await update.message.reply_text("Произошла ошибка при обработке вашего отзыва. Попробуйте еще раз.")
 
 def calculate(price_per_sqm, sqm):
