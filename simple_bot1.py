@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-import uuid
 import requests
 import httpx
 import logging
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+import os
 
 
 import telegram.error  # Добавляем этот импорт для доступа к telegram.error.Forbidden
@@ -192,43 +192,7 @@ for tariff_name, details in CLEANING_DETAILS.items():
         }
     }
 
-def add_review(context, user_name, review_text, photo_file_ids):
-    reviews = context.bot_data.get('reviews', [])
-    review_id = str(uuid.uuid4())  # Генерация уникального идентификатора
-    review = {
-        'id': review_id,  # Присваиваем уникальный ID
-        'user_name': user_name,
-        'review': review_text,
-        'photo_file_ids': photo_file_ids,
-        'approved': False
-    }
-    reviews.append(review)
-    context.bot_data['reviews'] = reviews
 
-def extract_review_id(data: str) -> int:
-    try:
-        # Пример: извлечение ID отзыва из строки данных
-        return int(data.split('_')[1])
-    except (IndexError, ValueError) as e:
-        logging.error(f"Ошибка при извлечении ID отзыва из строки '{data}': {e}")
-        return None
-
-
-def get_review_by_id(review_id: int, reviews: list) -> dict:
-    # Поиск отзыва по ID в списке отзывов
-    for review in reviews:
-        if review.get('id') == review_id:
-            return review
-    return None
-
-def mark_review_as_published(review_id: int, reviews: list) -> bool:
-    for review in reviews:
-        if review.get('id') == review_id:
-            review['approved'] = True
-            logger.debug(f"Отзыв с ID {review_id} помечен как опубликованный.")
-            return True
-    logger.debug(f"Не удалось пометить отзыв с ID {review_id} как опубликованный.")
-    return False
 # Функция для отправки сообщения с клавиатурой
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
     # Проверяем, что `options` это список списков
@@ -250,6 +214,7 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # Универсальная функция для обработки переходов между состояниями
+# Функция для обработки текстовых сообщений и фотографий
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
     user_state = context.user_data.get('state', 'main_menu')
@@ -581,6 +546,7 @@ async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> No
             media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
             await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
 
+        review['approved'] = True
         logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
     except Exception as e:
         logger.error(f"Ошибка при публикации отзыва: {e}")
@@ -597,6 +563,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         if query.data == "show_phone_number":
             phone_number = "+7 (995) 612-45-81"  # Укажите нужный номер телефона
+            phone_number = "+7 (995) 612-45-81"
             await query.edit_message_text(text=f"Номер телефона: {phone_number}")
             return
 
@@ -605,9 +572,24 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             pending_reviews = [review for review in reviews if not review.get('approved', False)]
             if 0 <= review_index < len(pending_reviews):
                 review = pending_reviews[review_index]
-                review['approved'] = True  # Отмечаем отзыв как одобренный
+                try:
+                    review_info = (
+                        f"Отзыв от {review['user_name']} (ID: {review['user_id']}) будет опубликован.\n"
+                        f"Текст отзыва: {review['review']}"
+                    )
+                    await context.bot.send_message(chat_id=ADMIN_ID, text=review_info)
 
-                await publish_review(context, review)  # Публикуем отзыв через функцию publish_review
+                    await context.bot.forward_message(
+                        chat_id=CHANNEL_ID,
+                        from_chat_id=review['user_id'],
+                        message_id=review['message_id']
+                    )
+                    review['approved'] = True
+                    await query.edit_message_text(text="Отзыв успешно опубликован.")
+                except telegram.error.Forbidden as e:
+                    logger.error(f"Не удалось переслать сообщение в канал: {e}")
+                    await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
+                await publish_review(context, review)  # Публикуем отзыв через новую функцию
                 await query.edit_message_text(text="Отзыв успешно опубликован.")
 
         elif query.data.startswith('delete_'):
@@ -645,42 +627,37 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = update.message.from_user
-        photo_file = await update.message.photo[-1].get_file()
-        file_url = photo_file.file_path
+        photo_file = await update.message.photo[-1].get_file()  # Получаем файл фото
+        file_path = f"{user.id}_photo.jpg"
+        await photo_file.download(file_path)  # Сохраняем файл на диск
 
-        # Скачиваем файл вручную с помощью httpx
-        file_name = f"{user.id}_photo.jpg"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(file_url)
-            with open(file_name, 'wb') as f:
-                f.write(response.content)
+        logging.info(f"Received photo from {user.first_name}, saved to {file_path}")
 
-        logging.info(f"Received photo from {user.first_name}, saved to {file_name}")
-
-        # Отправляем фото и текст отзыва администратору
-        admin_chat_id = ADMIN_ID
-        with open(file_name, 'rb') as photo:
-            # Отправляем фото
-            sent_message = await context.bot.send_photo(chat_id=admin_chat_id, photo=photo,
+        # Отправляем фото администратору
+        with open(file_path, 'rb') as photo:
+            sent_message = await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo,
                                                         caption=f"Новый отзыв от {user.first_name} (@{user.username})")
 
-            # Добавляем inline-кнопки для модерации после отправки фото
-            buttons = [
-                [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{sent_message.message_id}'),
-                 InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{sent_message.message_id}')]
-            ]
-            reply_markup = InlineKeyboardMarkup(buttons)
-
-            await context.bot.send_message(chat_id=admin_chat_id, text="Выберите действие для этого отзыва:",
-                                           reply_markup=reply_markup)
+        # Добавляем inline-кнопки для модерации после отправки фото
+        buttons = [
+            [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{sent_message.message_id}'),
+             InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{sent_message.message_id}')]
+        ]
+        reply_markup = InlineKeyboardMarkup(buttons)
+        await context.bot.send_message(chat_id=ADMIN_ID, text="Выберите действие для этого отзыва:",
+                                       reply_markup=reply_markup)
 
         # Отправляем подтверждение пользователю
         await update.message.reply_text("Спасибо за ваш отзыв! Он будет добавлен через некоторое время.")
         logging.info("Confirmation message sent.")
+
+        # Удаляем файл после отправки, чтобы не захламлять сервер
+        os.remove(file_path)
+        logging.info(f"File {file_path} removed after processing.")
+
     except Exception as e:
         logging.error(f"Error handling photo: {e}")
         await update.message.reply_text("Произошла ошибка при обработке вашего отзыва. Попробуйте еще раз.")
-
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
     formatted_message = f'Стоимость вашей уборки: {total_cost:.2f} руб.'

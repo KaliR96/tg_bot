@@ -704,8 +704,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 for i, r in enumerate(pending_reviews):
                     review_text = f"{i + 1}. {r['review']} - На рассмотрении"
                     buttons = [
-                        [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{r["id"]}'),
-                         InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{r["id"]}')]
+                        [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{review["id"]}'),
+                         InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{review["id"]}')]
                     ]
                     reply_markup = InlineKeyboardMarkup(buttons)
                     await context.bot.send_message(chat_id=query.message.chat_id, text=review_text,
