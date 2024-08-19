@@ -13,9 +13,12 @@ import telegram.error  # Добавляем этот импорт для дос�
 review_lock = asyncio.Lock()
 
 # Настраиваем логирование на уровне DEBUG
+import logging
+
+# Настраиваем логирование
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG
+    level=logging.INFO
 )
 
 logger = logging.getLogger(__name__)
@@ -190,21 +193,28 @@ def extract_review_id(data: str) -> int:
     # Пример: извлечение ID отзыва из строки данных
     return int(data.split('_')[1])
 
-def get_review_by_id(review_id: int) -> dict:
-    # Пример: получение отзыва из базы данных по его ID
-    # Возвращаем словарь с данными отзыва
-    pass
+def get_review_by_id(review_id: int, reviews: list) -> dict:
+    # Поиск отзыва по ID в списке отзывов
+    for review in reviews:
+        if review.get('id') == review_id:
+            return review
+    return None
 
-def mark_review_as_published(review_id: int) -> None:
-    # Пример: обновление состояния отзыва как опубликованного
-    pass
+def mark_review_as_published(review_id: int, reviews: list) -> bool:
+    for review in reviews:
+        if review.get('id') == review_id:
+            review['approved'] = True
+            logger.debug(f"Отзыв с ID {review_id} помечен как опубликованный.")
+            return True
+    logger.debug(f"Не удалось пометить отзыв с ID {review_id} как опубликованный.")
+    return False
 
 
 def add_review(context, user_name, review_text, photo_file_ids):
     reviews = context.bot_data.get('reviews', [])
     review_id = str(uuid.uuid4())  # Генерация уникального идентификатора
     review = {
-        'id': review_id,
+        'id': review_id,  # Присваиваем уникальный ID
         'user_name': user_name,
         'review': review_text,
         'photo_file_ids': photo_file_ids,
@@ -544,48 +554,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
 # Функция для публикации отзывов в канал
+
 async def publish_review(update: Update, context: CallbackContext) -> None:
-    query = update.callback_query
-    await query.answer()
-
-    # Извлечение ID отзыва из callback_data
     try:
-        review_id = query.data.split('_')[1]
-    except IndexError:
-        await query.edit_message_text(text="Ошибка: неправильный формат данных.")
-        return
+        callback_data = update.callback_query.data
+        review_id = callback_data.split('_')[1]  # Извлечение идентификатора отзыва из callback_data
 
-    reviews = context.bot_data.get('reviews', [])
+        # Логирование идентификатора
+        logger.debug(f"Получен review_id: {review_id}")
 
-    # Поиск отзыва по его уникальному идентификатору
-    review = next((r for r in reviews if r['id'] == review_id), None)
+        # Поиск отзыва по его уникальному идентификатору
+        reviews = context.bot_data.get('reviews', [])
+        logger.debug(f"Отзывы в системе: {reviews}")
 
-    if not review:
-        await query.edit_message_text(text="Ошибка: отзыв не найден.")
-        return
+        review = get_review_by_id(review_id, reviews)
 
-    # Публикация на канал
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,  # Отправляем сообщение в текущий чат администратора
-        text=f"Новый отзыв от {review['user_name']}:\n\n{review['review']}",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Опубликовать✅", callback_data=f"publish_{review['id']}"),
-             InlineKeyboardButton("Удалить🗑️", callback_data=f"delete_{review['id']}")]
-        ])
-    )
+        if review is None:
+            await update.callback_query.message.reply_text("Отзыв не найден или некорректный.")
+            return
 
-    # Отправка фотографий, если они есть
-    if review.get('photo_file_ids'):
-        media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
-        await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+        # Публикация на канал
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,  # Отправляем сообщение в текущий чат администратора
+            text=f"Новый отзыв от {review['user_name']}:\n\n{review['review']}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Опубликовать✅", callback_data=f"publish_{review['id']}"),
+                 InlineKeyboardButton("Удалить🗑️", callback_data=f"delete_{review['id']}")]
+            ])
+        )
 
+        if review.get('photo_file_ids'):
+            media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
+            await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
 
+        # Обновление состояния отзыва как опубликованного
+        if mark_review_as_published(review_id, reviews):
+            context.bot_data['reviews'] = reviews
+            await update.callback_query.message.reply_text("Отзыв успешно опубликован.")
+        else:
+            await update.callback_query.message.reply_text("Ошибка: не удалось обновить статус отзыва.")
 
-    # Пометка отзыва как опубликованного
-    review['approved'] = True
-    context.bot_data['reviews'] = reviews
+    except KeyError as e:
+        logger.error(f"Ошибка при публикации отзыва: отсутствует ключ {e}")
+        await update.callback_query.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
-    await query.edit_message_text(text="Отзыв опубликован.")
+    except Exception as e:
+        logger.error(f"Неизвестная ошибка: {e}")
+        await update.callback_query.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
 
 # Функция, которая обрабатывает нажатие кнопки публикации отзыва
