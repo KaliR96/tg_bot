@@ -212,30 +212,47 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info("Отправлено сообщение с кнопками: %s", message)
 
 
-# Универсальная функция для обработки переходов между состояниями
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        user = update.message.from_user
+        photo_file_id = update.message.photo[-1].file_id  # Получаем ID файла фото
+
+        # Сохраняем ID файла фото в user_data
+        if 'photo_file_ids' not in context.user_data:
+            context.user_data['photo_file_ids'] = []
+        context.user_data['photo_file_ids'].append(photo_file_id)
+
+        logging.info(f"Получено фото от {user.first_name} (ID: {user.id}). File ID: {photo_file_id}")
+
+        await update.message.reply_text("Фото получено! Пожалуйста, введите текст отзыва или подтвердите отправку.")
+    except Exception as e:
+        logging.error(f"Ошибка при обработке фото: {e}")
+        await update.message.reply_text("Произошла ошибка при обработке вашего отзыва. Попробуйте еще раз.")
+
+
+# Универсальная функция для обработки текстовых сообщений и фотографий
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.message.from_user.id
-    user_state = context.user_data.get('state', 'main_menu')
+    user_id = update.message.from_user.id  # Получаем ID пользователя
+    user_state = context.user_data.get('state', 'main_menu')  # Получаем текущее состояние пользователя
     logger.info("Текущее состояние: %s", user_state)
 
-    # Проверка на отзыв с фотографией
     if user_state == 'write_review':
-        review_text = update.message.text.strip() if update.message.text else ""
-        user_name = update.message.from_user.full_name
-        message_id = update.message.message_id
+        review_text = update.message.text.strip() if update.message.text else ""  # Получаем текст отзыва
+        user_name = update.message.from_user.full_name  # Получаем имя пользователя
+        message_id = update.message.message_id  # Получаем ID сообщения
 
-        # Обработка фотографий
+        # Проверяем, есть ли фотографии в сообщении
         if update.message.photo:
-            photo_file_id = update.message.photo[-1].file_id
+            photo_file_id = update.message.photo[-1].file_id  # Получаем ID файла фотографии (с наибольшим разрешением)
             if 'photo_file_ids' not in context.user_data:
-                context.user_data['photo_file_ids'] = []
-            context.user_data['photo_file_ids'].append(photo_file_id)
+                context.user_data['photo_file_ids'] = []  # Создаём список для хранения ID фотографий
+            context.user_data['photo_file_ids'].append(photo_file_id)  # Добавляем ID фотографии в список
 
             logger.info(f"Получено фото от {user_name} (ID: {user_id}). File ID: {photo_file_id}")
 
         # Если текст и/или фото переданы
         if review_text or 'photo_file_ids' in context.user_data:
-            # Сохраняем отзыв с текстом и/или фото
+            # Формируем данные отзыва
             review_data = {
                 'review': review_text,
                 'user_name': user_name,
@@ -251,17 +268,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
             logger.info(f"Отзыв сохранен: {review_text} от {user_name} (ID: {user_id}, Message ID: {message_id}, Photos: {len(review_data['photo_file_ids'])})")
 
+            # Отправляем сообщение пользователю о том, что отзыв получен
             await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
                                MENU_TREE['main_menu']['options'])
-            context.user_data['state'] = 'main_menu'
+            context.user_data['state'] = 'main_menu'  # Возвращаем пользователя в главное меню
             return
 
-        # Если нет текста, но есть фото, продолжаем ожидать текст
+        # Если фото было отправлено, но текст ещё не введён, продолжаем ожидать текст отзыва
         if 'photo_file_ids' in context.user_data:
             await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
             return
 
-    # Если сообщение пришло от администратора и он выбрал "Модерация"
+    # Здесь обрабатываются другие состояния, например, если пользователь администратор
+    # и выбрал "Модерация" или если пользователь просматривает тарифы и другие функции.
+    # Проверяем, если пользователь администратор и обрабатываем модерацию отзывов
     if user_id == ADMIN_ID and user_state == 'admin_menu':
         if update.message.text.strip() == 'Модерация':
             reviews = context.application.bot_data.get('reviews', [])
@@ -626,23 +646,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
 
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        user = update.message.from_user
-        photo_file_id = update.message.photo[-1].file_id  # Получаем ID файла фото
-
-        # Сохраняем ID файла фото в user_data
-        if 'photo_file_ids' not in context.user_data:
-            context.user_data['photo_file_ids'] = []
-        context.user_data['photo_file_ids'].append(photo_file_id)
-
-        logging.info(f"Получено фото от {user.first_name} (ID: {user.id}). File ID: {photo_file_id}")
-
-        await update.message.reply_text("Фото получено! Пожалуйста, введите текст отзыва или подтвердите отправку.")
-    except Exception as e:
-        logging.error(f"Ошибка при обработке фото: {e}")
-        await update.message.reply_text("Произошла ошибка при обработке вашего отзыва. Попробуйте еще раз.")
-
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
     formatted_message = f'Стоимость вашей уборки: {total_cost:.2f} руб.'
@@ -684,12 +687,12 @@ def main():
     application.add_handler(CommandHandler("start", start))
 
     # Добавляем обработчик текстовых сообщений
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.TEXT | filters.PHOTO & ~filters.COMMAND, handle_message))
 
     # Добавляем обработчик фотографий
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    # application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    # Добавляем обработчик inline-кнопок
+    # # Добавляем обработчик inline-кнопок
     application.add_handler(CallbackQueryHandler(button_click))
 
     logger.info("Бот успешно запущен, начало polling...")
