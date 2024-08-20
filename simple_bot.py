@@ -563,20 +563,26 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 review = pending_reviews[review_index]
                 try:
                     # Отправляем текст отзыва в канал, если он есть
-                    if review.get('review'):
-                        await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
-
-                    await context.bot.forward_message(
-                        chat_id=CHANNEL_ID,
-                        from_chat_id=review['user_id'],
-                        message_id=review['message_id']
-                    )
+                    # if review.get('review'):
+                    #     await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
 
                     # Отправляем фотографии отзыва в канал, если они есть
                     photo_ids = review.get('photo_file_ids', [])
                     if photo_ids:
                         media_group = [InputMediaPhoto(photo_id) for photo_id in photo_ids]
-                        await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+                        await context.bot.forward_message(
+                            chat_id=CHANNEL_ID,
+                            from_chat_id=review['user_id'],
+                            message_id=review['message_id'],
+                            media=media_group
+                        )
+                        # await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+                    else:
+                        await context.bot.forward_message(
+                            chat_id=CHANNEL_ID,
+                            from_chat_id=review['user_id'],
+                            message_id=review['message_id']
+                        )
 
                     review['approved'] = True
                     await query.edit_message_text(text="Отзыв успешно опубликован.")
