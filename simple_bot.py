@@ -294,6 +294,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 return
 
             for i, review in enumerate(pending_reviews):
+                # Формируем текст для отображения отзыва
                 review_text = (
                     f"Отзыв №{i + 1}:\n"
                     f"{review['review']}\n\n"
@@ -301,15 +302,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
                 logger.info(f"Отображаем отзыв для модерации: {review_text}")
 
+                # Отправляем текст отзыва админу
+                await update.message.reply_text(review_text)
+
+                # Если отзыв содержит фотографии, отправляем их админу
+                if 'photo_file_ids' in review:
+                    logger.info(f"Отзыв содержит {len(review['photo_file_ids'])} фото")
+                    media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
+                    await context.bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
+
+                # Добавляем кнопки для модерации (публикация или удаление отзыва)
                 buttons = [
                     [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
                      InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
                 ]
                 reply_markup = InlineKeyboardMarkup(buttons)
-                await update.message.reply_text(review_text, reply_markup=reply_markup)
 
-            context.user_data['state'] = 'moderation_menu'
-            return
+                # Отправляем админу сообщение с кнопками для модерации
+                await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
     # Обработка нажатия кнопки "Посмотреть Отзывы💬"
     if user_state == 'reviews_menu' and update.message.text.strip() == 'Посмотреть Отзывы💬':
@@ -582,28 +592,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if 0 <= review_index < len(pending_reviews):
                 review = pending_reviews[review_index]
                 try:
-                    # Отправляем текст отзыва в канал, если он есть
-                    # if review.get('review'):
-                    #     await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
+                    # Пересылаем сообщение от пользователя с текстом и фотографиями в канал
+                    await context.bot.forward_message(
+                        chat_id=CHANNEL_ID,
+                        from_chat_id=review['user_id'],
+                        message_id=review['message_id']
+                    )
 
-                    # Отправляем фотографии отзыва в канал, если они есть
-                    photo_ids = review.get('photo_file_ids', [])
-                    if photo_ids:
-                        media_group = [InputMediaPhoto(photo_id) for photo_id in photo_ids]
-                        await context.bot.forward_message(
-                            chat_id=CHANNEL_ID,
-                            from_chat_id=review['user_id'],
-                            message_id=review['message_id']
-                            # media=media_group
-                        )
-                        # await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
-                    else:
-                        await context.bot.forward_message(
-                            chat_id=CHANNEL_ID,
-                            from_chat_id=review['user_id'],
-                            message_id=review['message_id']
-                        )
-
+                    # Помечаем отзыв как одобренный
                     review['approved'] = True
                     await query.edit_message_text(text="Отзыв успешно опубликован.")
                     logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
