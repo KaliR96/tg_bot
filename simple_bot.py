@@ -213,6 +213,7 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # Универсальная функция для обработки переходов между состояниями
+# Функция для обработки текстовых сообщений и фотографий
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
     user_state = context.user_data.get('state', 'main_menu')
@@ -255,6 +256,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                MENU_TREE['main_menu']['options'])
             context.user_data['state'] = 'main_menu'
             return
+
+        # Если есть фото, но нет текста, продолжаем ожидать текст
+        if 'photo_file_ids' in context.user_data:
+            await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
+            return
+
 
         # Если нет текста, но есть фото, продолжаем ожидать текст
         if 'photo_file_ids' in context.user_data:
@@ -552,7 +559,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         reviews = context.application.bot_data.get('reviews', [])
 
         if query.data == "show_phone_number":
-            phone_number = "+7 (995) 612-45-81"
+            phone_number = "+7 (995) 612-45-81"  # Укажите нужный номер телефона
             await query.edit_message_text(text=f"Номер телефона: {phone_number}")
             return
 
@@ -561,7 +568,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             pending_reviews = [review for review in reviews if not review.get('approved', False)]
             if 0 <= review_index < len(pending_reviews):
                 review = pending_reviews[review_index]
-                await publish_review(context, review)  # Публикуем отзыв через новую функцию
+                await publish_review(context, review)  # Публикуем отзыв через функцию publish_review
                 await query.edit_message_text(text="Отзыв успешно опубликован.")
 
         elif query.data.startswith('delete_'):
@@ -593,7 +600,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
-
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
