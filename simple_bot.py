@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import requests
 import httpx
+from telegram.ext import filters
 import logging
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
@@ -15,7 +16,8 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
+# ID вашего канала
+CHANNEL_ID = -1002249882445
 # Укажите ваш Telegram ID
 ADMIN_ID = 1238802718  # Замените на ваш реальный Telegram ID
 
@@ -215,7 +217,6 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info("Отправлено сообщение с кнопками: %s", message)
 
 # Универсальная функция для обработки переходов между состояниями
-# Функция для обработки текстовых сообщений и фотографий
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
     user_state = context.user_data.get('state', 'main_menu')
@@ -482,71 +483,79 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'), menu['options'])
 
-# ID вашего канала
-CHANNEL_ID = -1002249882445
+# Функция для обработки отправки отзыва
+async def handle_review_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Получаем текст отзыва, если он есть
+    review_text = update.message.text.strip() if update.message.text else update.message.caption if update.message.caption else None
 
-#Функция для обработки отправки отзыва
-async def handle_review_submission(update: Update, context: ContextTypes.DEFAULT_TYPE, review_text=None):
+    # Сохраняем текст отзыва
     if review_text:
         context.user_data['review_text'] = review_text
 
-    if 'photo_file_ids' not in context.user_data and not context.user_data.get('review_text'):
+    # Сохраняем фотографии, если они есть
+    if update.message.photo:
+        photo_file_id = update.message.photo[-1].file_id
+        if 'photo_file_ids' not in context.user_data:
+            context.user_data['photo_file_ids'] = []
+        context.user_data['photo_file_ids'].append(photo_file_id)
+
+    # Проверяем, есть ли что-то для сохранения
+    if 'review_text' in context.user_data or 'photo_file_ids' in context.user_data:
+        review_data = {
+            'review': context.user_data.get('review_text', ''),
+            'user_name': update.message.from_user.full_name,
+            'user_id': update.message.from_user.id,
+            'message_id': update.message.message_id,
+            'approved': False,
+            'photo_file_ids': context.user_data.get('photo_file_ids', [])
+        }
+
+        # Добавляем отзыв в список на модерацию
+        context.application.bot_data.setdefault('reviews', []).append(review_data)
+
+        # Очищаем данные пользователя
+        context.user_data.pop('photo_file_ids', None)
+        context.user_data.pop('review_text', None)
+
+        logger.info(
+            f"Отзыв сохранен: {review_data['review']} от {review_data['user_name']} (ID: {review_data['user_id']})")
+        await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
+                           MENU_TREE['main_menu']['options'])
+        await go_to_main_menu(update, context)
+    else:
+        # Если ни текста, ни фото не было получено, просим пользователя добавить что-то к отзыву
         await update.message.reply_text("Пожалуйста, добавьте текст или фото к отзыву.")
-        return
 
-    # Сохраняем отзыв
-    review_data = {
-        'review': context.user_data.get('review_text', ''),
-        'user_name': update.message.from_user.full_name,
-        'user_id': update.message.from_user.id,
-        'message_id': update.message.message_id,
-        'approved': False,
-        'photo_file_ids': context.user_data.get('photo_file_ids', [])
-    }
-
-    context.application.bot_data.setdefault('reviews', []).append(review_data)
-    context.user_data.pop('photo_file_ids', None)
-    context.user_data.pop('review_text', None)
-
-    logger.info(f"Отзыв сохранен: {review_data['review']} от {review_data['user_name']} (ID: {review_data['user_id']})")
-    await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
-                       MENU_TREE['main_menu']['options'])
-    await go_to_main_menu(update, context)
 
 # Функция для публикации отзывов в канал
 async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
     try:
-        # Отправляем текст отзыва в канал, если он есть
-        if review.get('review'):
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
-
-        # Отправляем фотографии отзыва в канал, если они есть
-        photo_ids = review.get('photo_file_ids', [])
-        if photo_ids:
-            media_group = [InputMediaPhoto(photo_id) for photo_id in photo_ids]
+        # Если есть фотографии и текст, отправляем их в канал
+        if review.get('photo_file_ids'):
+            media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
+            # Отправляем фото и добавляем текст как подпись к первому фото
             await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+            if review.get('review'):
+                await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
+
+        # Если есть только текст, отправляем его
+        elif review.get('review'):
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
 
         review['approved'] = True
         logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
     except Exception as e:
         logger.error(f"Ошибка при публикации отзыва: {e}")
-        # Можно отправить сообщение администратору о неудачной публикации
+        # Сообщение администратору о неудачной публикации
         await context.bot.send_message(chat_id=ADMIN_ID, text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
 
-# Обновленная функция для обработки нажатий на inline-кнопки
 # Функция для обработки нажатий на inline-кнопки
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         query = update.callback_query
         await query.answer()
 
-        user_state = context.user_data.get('state', 'main_menu')
         reviews = context.application.bot_data.get('reviews', [])
-
-        if query.data == "show_phone_number":
-            phone_number = "+7 (995) 612-45-81"  # Укажите нужный номер телефона
-            await query.edit_message_text(text=f"Номер телефона: {phone_number}")
-            return
 
         if query.data.startswith('publish_'):
             review_index = int(query.data.split('_')[1])
@@ -568,23 +577,6 @@ async def send_contact_options(update: Update, context: ContextTypes.DEFAULT_TYP
     reply_markup = InlineKeyboardMarkup(buttons)
 
     await update.message.reply_text("Выберите способ связи:", reply_markup=reply_markup)
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        user = update.message.from_user
-        photo_file_id = update.message.photo[-1].file_id  # Получаем ID файла фото
-
-        # Сохраняем ID файла фото в user_data
-        if 'photo_file_ids' not in context.user_data:
-            context.user_data['photo_file_ids'] = []
-        context.user_data['photo_file_ids'].append(photo_file_id)
-
-        logging.info(f"Получено фото от {user.first_name} (ID: {user.id}). File ID: {photo_file_id}")
-
-        await update.message.reply_text("Фото получено! Пожалуйста, введите текст отзыва или подтвердите отправку.")
-    except Exception as e:
-        logging.error(f"Ошибка при обработке фото: {e}")
-        await update.message.reply_text("Произошла ошибка при обработке вашего отзыва. Попробуйте еще раз.")
 
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
@@ -615,28 +607,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_message(update, context, menu['message'], menu['options'])
 
 
-# Основная функция для запуска бота
+# Основная функция для запуска бота\
+
+from telegram.ext import filters
+
 def main():
     logger.info("Запуск бота")
 
     TOKEN = '7363733923:AAHKPw_fvjG2F3PBE2XP6Sj49u04uy7wpZE'
-
     application = Application.builder().token(TOKEN).build()
+
+    # Фильтр для исключения сообщений от самого бота
+    not_from_bot = filters.TEXT | filters.PHOTO & ~filters.COMMAND & ~filters.FROM_BOT
 
     # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", start))
 
-    # Добавляем обработчик текстовых сообщений
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Добавляем обработчик фотографий
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    # Устанавливаем обработчик для текстовых сообщений и фото
+    application.add_handler(MessageHandler(not_from_bot, handle_review_submission))
 
     # Добавляем обработчик inline-кнопок
     application.add_handler(CallbackQueryHandler(button_click))
 
     logger.info("Бот успешно запущен, начало polling...")
     application.run_polling()
+
 
 
 if __name__ == '__main__':
