@@ -562,21 +562,23 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if 0 <= review_index < len(pending_reviews):
                 review = pending_reviews[review_index]
                 try:
-                    review_info = (
-                        f"Отзыв от {review['user_name']} (ID: {review['user_id']}) будет опубликован.\n"
-                        f"Текст отзыва: {review['review']}"
-                    )
-                    await context.bot.send_message(chat_id=ADMIN_ID, text=review_info)
+                    # Отправляем текст отзыва в канал, если он есть
+                    if review.get('review'):
+                        await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
 
-                    await context.bot.forward_message(
-                        chat_id=CHANNEL_ID,
-                        from_chat_id=review['user_id'],
-                        message_id=review['message_id']
-                    )
+                    # Отправляем фотографии отзыва в канал, если они есть
+                    photo_ids = review.get('photo_file_ids', [])
+                    if photo_ids:
+                        media_group = [InputMediaPhoto(photo_id) for photo_id in photo_ids]
+                        await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+
                     review['approved'] = True
                     await query.edit_message_text(text="Отзыв успешно опубликован.")
-                except telegram.error.Forbidden as e:
-                    logger.error(f"Не удалось переслать сообщение в канал: {e}")
+                    logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
+                except Exception as e:
+                    logger.error(f"Ошибка при публикации отзыва: {e}")
+                    await context.bot.send_message(chat_id=ADMIN_ID,
+                                                   text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
                     await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
 
         elif query.data.startswith('delete_'):
