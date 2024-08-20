@@ -552,7 +552,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         reviews = context.application.bot_data.get('reviews', [])
 
         if query.data == "show_phone_number":
-            phone_number = "+7 (995) 612-45-81"
+            phone_number = "+7 (995) 612-45-81"  # Укажите нужный номер телефона
             await query.edit_message_text(text=f"Номер телефона: {phone_number}")
             return
 
@@ -561,8 +561,23 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             pending_reviews = [review for review in reviews if not review.get('approved', False)]
             if 0 <= review_index < len(pending_reviews):
                 review = pending_reviews[review_index]
-                await publish_review(context, review)  # Публикуем отзыв через новую функцию
-                await query.edit_message_text(text="Отзыв успешно опубликован.")
+                try:
+                    review_info = (
+                        f"Отзыв от {review['user_name']} (ID: {review['user_id']}) будет опубликован.\n"
+                        f"Текст отзыва: {review['review']}"
+                    )
+                    await context.bot.send_message(chat_id=ADMIN_ID, text=review_info)
+
+                    await context.bot.forward_message(
+                        chat_id=CHANNEL_ID,
+                        from_chat_id=review['user_id'],
+                        message_id=review['message_id']
+                    )
+                    review['approved'] = True
+                    await query.edit_message_text(text="Отзыв успешно опубликован.")
+                except telegram.error.Forbidden as e:
+                    logger.error(f"Не удалось переслать сообщение в канал: {e}")
+                    await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
 
         elif query.data.startswith('delete_'):
             review_index = int(query.data.split('_')[1])
@@ -571,9 +586,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 reviews.remove(pending_reviews[review_index])
                 await query.edit_message_text(text="Отзыв безвозвратно удален.")
 
-        # Перепроверка оставшихся отзывов для модерации
+        # Обновляем список только неопубликованных отзывов после публикации или удаления
+        reviews = context.application.bot_data.get('reviews', [])
         pending_reviews = [review for review in reviews if not review.get('approved', False)]
 
+        # Отображаем обновленный список оставшихся отзывов
         if not pending_reviews:
             await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
             reply_keyboard = [['Админ меню']]
