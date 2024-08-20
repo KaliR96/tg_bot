@@ -566,6 +566,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     if review.get('review'):
                         await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
 
+                    await context.bot.forward_message(
+                        chat_id=CHANNEL_ID,
+                        from_chat_id=review['user_id'],
+                        message_id=review['message_id']
+                    )
+
                     # Отправляем фотографии отзыва в канал, если они есть
                     photo_ids = review.get('photo_file_ids', [])
                     if photo_ids:
