@@ -294,32 +294,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 return
 
             for i, review in enumerate(pending_reviews):
-                # Формируем текст для отображения отзыва
-                review_text = (
-                    f"Отзыв №{i + 1}:\n"
-                    f"{review['review']}\n\n"
-                    f"Автор: {review['user_name']} (ID: {review['user_id']})"
-                )
-                logger.info(f"Отображаем отзыв для модерации: {review_text}")
+                try:
+                    # Пересылаем оригинальное сообщение пользователя админу
+                    await context.bot.forward_message(
+                        chat_id=ADMIN_ID,
+                        from_chat_id=review['user_id'],
+                        message_id=review['message_id']
+                    )
 
-                # Отправляем текст отзыва админу
-                await update.message.reply_text(review_text)
+                    # Добавляем кнопки для модерации (публикация или удаление отзыва)
+                    buttons = [
+                        [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
+                         InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(buttons)
 
-                # Если отзыв содержит фотографии, отправляем их админу
-                if 'photo_file_ids' in review:
-                    logger.info(f"Отзыв содержит {len(review['photo_file_ids'])} фото")
-                    media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
-                    await context.bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
+                    # Отправляем админу сообщение с кнопками для модерации
+                    await context.bot.send_message(chat_id=ADMIN_ID, text="Выберите действие:",
+                                                   reply_markup=reply_markup)
 
-                # Добавляем кнопки для модерации (публикация или удаление отзыва)
-                buttons = [
-                    [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                     InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
-                ]
-                reply_markup = InlineKeyboardMarkup(buttons)
+                except Exception as e:
+                    logger.error(f"Ошибка при пересылке сообщения: {e}")
 
                 # Отправляем админу сообщение с кнопками для модерации
-                await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
+                #await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
     # Обработка нажатия кнопки "Посмотреть Отзывы💬"
     if user_state == 'reviews_menu' and update.message.text.strip() == 'Посмотреть Отзывы💬':
@@ -390,23 +388,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
         for i, review in enumerate(pending_reviews):
-            review_text = (
-                f"{i + 1}. {review['review']} - {'Одобрено' if review.get('approved', False) else 'На рассмотрении'}\n"
-                f"Автор: {review['user_name']} (ID: {review['user_id']})"
-            )
-            logger.info(f"Отображаем отзыв для модерации: {review_text}")
+            try:
+                # Пересылаем оригинальное сообщение пользователя с текстом и фотографиями админу.
+                await context.bot.forward_message(
+                    chat_id=ADMIN_ID,  # ID чата администратора
+                    from_chat_id=review['user_id'],  # ID пользователя, от которого пересылаем сообщение
+                    message_id=review['message_id']  # ID пересылаемого сообщения
+                )
 
-            if 'photo_file_ids' in review:
-                logger.info(f"Отзыв содержит {len(review['photo_file_ids'])} фото")
-                media_group = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
-                await context.bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
+                buttons = [
+                    [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
+                     InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
+                ]
+                reply_markup = InlineKeyboardMarkup(buttons)
 
-            buttons = [
-                [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                 InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
-            ]
-            reply_markup = InlineKeyboardMarkup(buttons)
-            await update.message.reply_text(review_text, reply_markup=reply_markup)
+                # Отправляем админу сообщение с кнопками для модерации
+                await context.bot.send_message(chat_id=ADMIN_ID, text="Выберите действие:", reply_markup=reply_markup)
+
+            except Exception as e:
+                logger.error(f"Ошибка при пересылке сообщения: {e}")
 
         context.user_data['state'] = 'moderation_menu'
         return
