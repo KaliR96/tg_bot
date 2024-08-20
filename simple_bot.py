@@ -511,7 +511,7 @@ async def handle_review_submission(update: Update, context: ContextTypes.DEFAULT
     logger.info(f"Отзыв сохранен: {review_data['review']} от {review_data['user_name']} (ID: {review_data['user_id']})")
     await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
                        MENU_TREE['main_menu']['options'])
-    go_to_main_menu(update, context)
+    await go_to_main_menu(update, context)
 
 # Функция для публикации отзывов в канал
 async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
