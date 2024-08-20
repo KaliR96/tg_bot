@@ -279,8 +279,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
             return
 
-    # Здесь обрабатываются другие состояния, например, если пользователь администратор
-    # и выбрал "Модерация" или если пользователь просматривает тарифы и другие функции.
     # Проверяем, если пользователь администратор и обрабатываем модерацию отзывов
     if user_id == ADMIN_ID and user_state == 'admin_menu':
         if update.message.text.strip() == 'Модерация':
@@ -355,7 +353,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     context.user_data['state'] = 'admin_menu'
                     return
 
-                for i, review in enumerate(pending_reviews):
+                '''for i, review in enumerate(pending_reviews):
                     review_text = f"{i + 1}. {review['review']} - На рассмотрении"
                     buttons = [
                         [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
@@ -365,7 +363,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     await update.message.reply_text(review_text, reply_markup=reply_markup)
 
                 context.user_data['state'] = 'moderation_menu'
-                return
+                return'''
 
         elif user_state == 'moderation_menu':
             if update.message.text.strip() == 'Админ меню':
@@ -387,26 +385,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data['state'] = 'admin_menu'
             return
 
-        for i, review in enumerate(pending_reviews):
-            try:
-                # Пересылаем оригинальное сообщение пользователя с текстом и фотографиями админу.
-                await context.bot.forward_message(
-                    chat_id=ADMIN_ID,  # ID чата администратора
-                    from_chat_id=review['user_id'],  # ID пользователя, от которого пересылаем сообщение
-                    message_id=review['message_id']  # ID пересылаемого сообщения
-                )
+        # Обрабатываем только первый отзыв в списке, чтобы избежать дублирования
+        review = pending_reviews[0]
+        try:
+            # Пересылаем оригинальное сообщение пользователя с текстом и фотографиями админу.
+            await context.bot.forward_message(
+                chat_id=ADMIN_ID,
+                from_chat_id=review['user_id'],
+                message_id=review['message_id']
+            )
 
-                buttons = [
-                    [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                     InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
-                ]
-                reply_markup = InlineKeyboardMarkup(buttons)
+            buttons = [
+                [InlineKeyboardButton("Опубликовать✅", callback_data='publish_0'),
+                 InlineKeyboardButton("Удалить🗑️", callback_data='delete_0')]
+            ]
+            reply_markup = InlineKeyboardMarkup(buttons)
 
-                # Отправляем админу сообщение с кнопками для модерации
-                await context.bot.send_message(chat_id=ADMIN_ID, text="Выберите действие:", reply_markup=reply_markup)
+            # Отправляем админу сообщение с кнопками для модерации
+            await context.bot.send_message(chat_id=ADMIN_ID, text="Выберите действие:", reply_markup=reply_markup)
 
-            except Exception as e:
-                logger.error(f"Ошибка при пересылке сообщения: {e}")
+        except Exception as e:
+            logger.error(f"Ошибка при пересылке сообщения: {e}")
 
         context.user_data['state'] = 'moderation_menu'
         return
@@ -622,11 +621,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         # Отображаем обновленный список оставшихся отзывов
         if not pending_reviews:
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
-            reply_keyboard = [['Админ меню']]
-            reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Вернуться в админ меню:",
-                                           reply_markup=reply_markup)
+            # Этот блок был удален, чтобы не отправлять сообщения администратору после обработки всех отзывов.
+            context.user_data['state'] = 'admin_menu'
+            return
+
         else:
             for i, review in enumerate(pending_reviews):
                 review_text = f"{i + 1}. {review['review']} - На рассмотрении"
