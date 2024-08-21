@@ -5,7 +5,6 @@ import logging
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-
 import telegram.error  # Добавляем этот импорт для доступа к telegram.error.Forbidden
 
 # Настраиваем логирование
@@ -15,7 +14,8 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
+# ID вашего канала
+CHANNEL_ID = -1002249882445
 # Укажите ваш Telegram ID
 ADMIN_ID = 1238802718  # Замените на ваш реальный Telegram ID
 
@@ -68,10 +68,11 @@ CLEANING_DETAILS = {
 # Определение дерева меню
 MENU_TREE = {
     'main_menu': {
-        'message': 'Привет! Я Вера, твоя фея чистоты.\n\nМой робот-уборщик поможет:\n\n🔍Ознакомиться с моими услугами\n\n🧮Рассчитать стоимость уборки\n\n🚗Заказать клининг на дом\n\n📞Связаться со мной.',
+        'message': 'Привет! Я Вера, твоя фея чистоты.\n\nМой робот-уборщик поможет:\n\n🔍Ознакомиться с моими '
+                   'услугами\n\n🧮Рассчитать стоимость уборки\n\n🚗Заказать клининг на дом\n\n📞Связаться со мной.',
         'options': [
             ['Тарифы🏷️', 'Калькулятор🧮'],  # Первая строка
-            ['Связаться📞', 'Отзывы💬']     # Вторая строка
+            ['Связаться📞', 'Отзывы💬']  # Вторая строка
         ],
         'next_state': {
             'Тарифы🏷️': 'show_tariffs',
@@ -123,8 +124,8 @@ MENU_TREE = {
         'message': 'Выберите тариф для получения подробностей:',
         'options': [
             ['Ген.Уборка🧼', 'Повседневная🧹'],  # Первая строка
-            ['Послестрой🛠', 'Мытье окон🧴'],   # Вторая строка
-            ['В начало🔙']                      # Третья строка с одной кнопкой
+            ['Послестрой🛠', 'Мытье окон🧴'],  # Вторая строка
+            ['В начало🔙']  # Третья строка с одной кнопкой
         ],
         'next_state': {
             'Ген.Уборка🧼': 'detail_Ген.Уборка🧼',
@@ -138,8 +139,8 @@ MENU_TREE = {
         'message': 'Выберите тип уборки🧺:',
         'options': [
             ['Ген.Уборка🧼', 'Повседневная🧹'],  # Первая строка
-            ['Послестрой🛠', 'Мытье окон🧴'],   # Вторая строка
-            ['В начало🔙']                      # Третья строка с одной кнопкой
+            ['Послестрой🛠', 'Мытье окон🧴'],  # Вторая строка
+            ['В начало🔙']  # Третья строка с одной кнопкой
         ],
         'next_state': {
             'Ген.Уборка🧼': 'enter_square_meters',
@@ -266,7 +267,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.application.bot_data.setdefault('reviews', []).append(review_data)
             context.user_data.pop('photo_file_ids', None)  # Очищаем временные данные о фото
 
-            logger.info(f"Отзыв сохранен: {review_text} от {user_name} (ID: {user_id}, Message ID: {message_id}, Photos: {len(review_data['photo_file_ids'])})")
+            logger.info(
+                f"Отзыв сохранен: {review_text} от {user_name} (ID: {user_id}, Message ID: {message_id}, Photos: {len(review_data['photo_file_ids'])})")
 
             # Отправляем сообщение пользователю о том, что отзыв получен
             await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
@@ -373,42 +375,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 return
 
     # Обработка модерации отзывов
-    if user_state == 'moderation_menu':
-        reviews = context.application.bot_data.get('reviews', [])
-        pending_reviews = [review for review in reviews if not review.get('approved', False)]
-
-        logger.info(f"Найдено {len(pending_reviews)} отзывов для модерации")
-
-        if not pending_reviews:
-            await send_message(update, context, "Нет отзывов для модерации.",
-                               MENU_TREE['admin_menu']['options'])
-            context.user_data['state'] = 'admin_menu'
+    if user_id == ADMIN_ID and user_state == 'admin_menu':
+        if update.message.text.strip() == 'Модерация':
+            await moderate_reviews(update, context, user_state)
             return
-
-        # Обрабатываем только первый отзыв в списке, чтобы избежать дублирования
-        review = pending_reviews[0]
-        try:
-            # Пересылаем оригинальное сообщение пользователя с текстом и фотографиями админу.
-            await context.bot.forward_message(
-                chat_id=ADMIN_ID,
-                from_chat_id=review['user_id'],
-                message_id=review['message_id']
-            )
-
-            buttons = [
-                [InlineKeyboardButton("Опубликовать✅", callback_data='publish_0'),
-                 InlineKeyboardButton("Удалить🗑️", callback_data='delete_0')]
-            ]
-            reply_markup = InlineKeyboardMarkup(buttons)
-
-            # Отправляем админу сообщение с кнопками для модерации
-            await context.bot.send_message(chat_id=ADMIN_ID, text="Выберите действие:", reply_markup=reply_markup)
-
-        except Exception as e:
-            logger.error(f"Ошибка при пересылке сообщения: {e}")
-
-        context.user_data['state'] = 'moderation_menu'
-        return
 
     # Обработка состояния "Отзывы💬"
     if user_state == 'reviews_menu':
@@ -545,11 +515,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if next_menu:
             await send_message(update, context, next_menu['message'], next_menu['options'])
     else:
-        await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'), menu['options'])
+        await send_message(update, context, menu.get('fallback', 'Пожалуйста, выберите опцию из меню.'),
+                           menu['options'])
 
-
-# ID вашего канала
-CHANNEL_ID = -1002249882445
 
 # Функция для публикации отзывов в канал
 async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
@@ -569,7 +537,45 @@ async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> No
     except Exception as e:
         logger.error(f"Ошибка при публикации отзыва: {e}")
         # Можно отправить сообщение администратору о неудачной публикации
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
+        await context.bot.send_message(chat_id=ADMIN_ID,
+                                       text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
+
+
+async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state: str) -> None:
+    if 'pending_reviews' not in context.user_data:
+        reviews = context.application.bot_data.get('reviews', [])
+        context.user_data['pending_reviews'] = [review for review in reviews if not review.get('approved', False)]
+
+    pending_reviews = context.user_data['pending_reviews']
+
+    if not pending_reviews:
+        await send_message(update, context, "Нет отзывов для модерации.", MENU_TREE['admin_menu']['options'])
+        context.user_data['state'] = 'admin_menu'
+        return
+
+    for i, review in enumerate(pending_reviews):
+        try:
+            if not review.get('deleted', False):
+                await context.bot.forward_message(
+                    chat_id=ADMIN_ID,
+                    from_chat_id=review['user_id'],
+                    message_id=review['message_id']
+                )
+
+                buttons = [
+                    [InlineKeyboardButton(f"Опубликовать✅", callback_data=f'publish_{i}'),
+                     InlineKeyboardButton(f"Удалить🗑️", callback_data=f'delete_{i}')]
+                ]
+                reply_markup = InlineKeyboardMarkup(buttons)
+
+                await context.bot.send_message(chat_id=ADMIN_ID, text="Выберите действие:", reply_markup=reply_markup)
+            else:
+                await context.bot.send_message(chat_id=ADMIN_ID, text="Отзыв удален.")
+        except Exception as e:
+            logger.error(f"Ошибка при пересылке сообщения: {e}")
+
+    context.user_data['state'] = 'moderation_menu'
+
 
 # Обновленная функция для обработки нажатий на inline-кнопки
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -578,83 +584,52 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.answer()
 
         user_state = context.user_data.get('state', 'main_menu')
-        reviews = context.application.bot_data.get('reviews', [])
 
-        if query.data == "show_phone_number":
-            phone_number = "+7 (995) 612-45-81"  # Укажите нужный номер телефона
-            await query.edit_message_text(text=f"Номер телефона: {phone_number}")
-            return
-
-        if user_state == 'moderation_menu' and query.data.startswith('publish_'):
+        if user_state == 'moderation_menu':
             review_index = int(query.data.split('_')[1])
-            pending_reviews = [review for review in reviews if not review.get('approved', False)]
+
+            pending_reviews = context.user_data.get('pending_reviews', [])
+
             if 0 <= review_index < len(pending_reviews):
                 review = pending_reviews[review_index]
-                try:
-                    # Пересылаем сообщение от пользователя с текстом и фотографиями в канал
-                    await context.bot.forward_message(
-                        chat_id=CHANNEL_ID,
-                        from_chat_id=review['user_id'],
-                        message_id=review['message_id']
-                    )
 
-                    # Помечаем отзыв как одобренный
+                if query.data.startswith('delete_'):
+                    review['deleted'] = True
+                    await query.edit_message_text(text="Отзыв безвозвратно удален.")
+                    # Убираем отзыв из списка в bot_data
+                    context.application.bot_data['reviews'].remove(review)
+
+                elif query.data.startswith('publish_'):
                     review['approved'] = True
-                    # Обновляем список отзывов после публикации
-                    context.application.bot_data['reviews'] = reviews
+                    await publish_review(context, review)
                     await query.edit_message_text(text="Отзыв успешно опубликован.")
-                    logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
-                except Exception as e:
-                    logger.error(f"Ошибка при публикации отзыва: {e}")
-                    await context.bot.send_message(chat_id=ADMIN_ID,
-                                                   text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
-                    await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
+                    # Обновляем статус отзыва в bot_data
+                    for r in context.application.bot_data['reviews']:
+                        if r['user_id'] == review['user_id'] and r['message_id'] == review['message_id']:
+                            r['approved'] = True
 
+                context.user_data['pending_reviews'][review_index] = review
 
+            # Проверяем, есть ли еще отзывы для модерации
+            remaining_reviews = [review for review in pending_reviews if
+                                 not review.get('approved', False) and not review.get('deleted', False)]
+            if not remaining_reviews:
+                await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
+                context.user_data.pop('pending_reviews', None)
+                context.user_data['state'] = 'admin_menu'
+                return
 
-        elif query.data.startswith('delete_'):
+            # Администратор может вернуться в админ-меню или продолжить модерацию
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Вернуться в админ меню:",
+                                           reply_markup=ReplyKeyboardMarkup([['Админ меню']], resize_keyboard=True))
 
-            review_index = int(query.data.split('_')[1])
-
-            pending_reviews = [review for review in reviews if not review.get('approved', False)]
-
-            if 0 <= review_index < len(pending_reviews):
-
-                # Удаляем отзыв из общего списка
-
-                reviews.remove(pending_reviews[review_index])
-
-                context.application.bot_data['reviews'] = reviews  # Сохраняем изменения
-
-                await query.edit_message_text(text="Отзыв безвозвратно удален.")
-
-                # Обновляем список только неопубликованных отзывов после удаления
-
-                pending_reviews = [review for review in reviews if not review.get('approved', False)]
-
-                # Проверяем, есть ли еще отзывы для модерации
-
-                if not pending_reviews:
-                    await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
-
-                    context.user_data['state'] = 'admin_menu'
-
-                    return
-
-                # Продолжить модерацию следующих отзывов
-
-                review = pending_reviews[0]
-
-                await context.bot.send_message(chat_id=query.message.chat_id, text="Следующий отзыв готов к модерации.")
-
-                # Либо можно обновить UI для продолжения работы
-
-
+            context.user_data['state'] = 'moderation_menu'
 
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
         await context.bot.send_message(chat_id=ADMIN_ID,
                                        text=f"Произошла ошибка при обработке нажатия кнопки: {e}")
+
 
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
@@ -663,6 +638,8 @@ def calculate(price_per_sqm, sqm):
         'total_cost': total_cost,
         'formatted_message': formatted_message
     }
+
+
 # Функция для расчета стоимости мытья окон
 def calculate_windows(price_per_panel, num_panels):
     total_cost = price_per_panel * num_panels
@@ -671,6 +648,7 @@ def calculate_windows(price_per_panel, num_panels):
         'total_cost': total_cost,
         'formatted_message': formatted_message
     }
+
 
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
