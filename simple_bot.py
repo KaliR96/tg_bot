@@ -244,12 +244,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         # Проверяем, есть ли фотографии в сообщении
         if update.message.photo:
-            photo_file_id = update.message.photo[-1].file_id  # Получаем ID файла фотографии (с наибольшим разрешением)
             if 'photo_file_ids' not in context.user_data:
-                context.user_data['photo_file_ids'] = []  # Создаём список для хранения ID фотографий
-            context.user_data['photo_file_ids'].append(photo_file_id)  # Добавляем ID фотографии в список
-
-            logger.info(f"Получено фото от {user_name} (ID: {user_id}). File ID: {photo_file_id}")
+                context.user_data['photo_file_ids'] = []
+            # Сохраняем все фото из сообщения
+            for photo in update.message.photo:
+                context.user_data['photo_file_ids'].append(photo.file_id)
 
         # Если текст и/или фото переданы
         if review_text or 'photo_file_ids' in context.user_data:
@@ -502,6 +501,7 @@ async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE, u
     for i, review in enumerate(pending_reviews):
         try:
             if not review.get('deleted', False):
+                # Пересылаем оригинальное сообщение пользователя с текстом и фотографиями
                 await context.bot.forward_message(
                     chat_id=ADMIN_ID,
                     from_chat_id=review['user_id'],
