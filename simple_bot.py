@@ -8,10 +8,10 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 import telegram.error  # Добавляем этот импорт для доступа к telegram.error.Forbidden
 
-# Настраиваем логирование на уровне DEBUG
+# Настраиваем логирование
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG
+    level=logging.INFO
 )
 
 logger = logging.getLogger(__name__)
@@ -600,6 +600,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
                     # Помечаем отзыв как одобренный
                     review['approved'] = True
+                    # Обновляем список отзывов после публикации
+                    context.application.bot_data['reviews'] = reviews
                     await query.edit_message_text(text="Отзыв успешно опубликован.")
                     logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
                 except Exception as e:
@@ -608,28 +610,51 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                                    text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
                     await query.edit_message_text(text="Произошла ошибка при отправке отзыва в канал.")
 
+
+
         elif query.data.startswith('delete_'):
+
             review_index = int(query.data.split('_')[1])
+
             pending_reviews = [review for review in reviews if not review.get('approved', False)]
 
             if 0 <= review_index < len(pending_reviews):
+
+                # Удаляем отзыв из общего списка
+
                 reviews.remove(pending_reviews[review_index])
+
+                context.application.bot_data['reviews'] = reviews  # Сохраняем изменения
+
                 await query.edit_message_text(text="Отзыв безвозвратно удален.")
 
-            # Обновляем список только неопубликованных отзывов после удаления
-            pending_reviews = [review for review in reviews if not review.get('approved', False)]
+                # Обновляем список только неопубликованных отзывов после удаления
 
-            # Если больше нет отзывов для обработки, возвращаемся в админ меню
-            if not pending_reviews:
-                await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
-                context.user_data['state'] = 'admin_menu'
-                return
+                pending_reviews = [review for review in reviews if not review.get('approved', False)]
+
+                # Проверяем, есть ли еще отзывы для модерации
+
+                if not pending_reviews:
+                    await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
+
+                    context.user_data['state'] = 'admin_menu'
+
+                    return
+
+                # Продолжить модерацию следующих отзывов
+
+                review = pending_reviews[0]
+
+                await context.bot.send_message(chat_id=query.message.chat_id, text="Следующий отзыв готов к модерации.")
+
+                # Либо можно обновить UI для продолжения работы
+
+
 
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
         await context.bot.send_message(chat_id=ADMIN_ID,
                                        text=f"Произошла ошибка при обработке нажатия кнопки: {e}")
-
 
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
