@@ -216,16 +216,17 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = update.message.from_user
-        photo_file_id = update.message.photo[-1].file_id  # Получаем ID файла фото
+        photos = update.message.photo  # Получаем все фото
 
-        # Сохраняем ID файла фото в user_data
+        # Сохраняем ID файлов фото в user_data
         if 'photo_file_ids' not in context.user_data:
             context.user_data['photo_file_ids'] = []
-        context.user_data['photo_file_ids'].append(photo_file_id)
+        for photo in photos:
+            context.user_data['photo_file_ids'].append(photo.file_id)
 
-        logging.info(f"Получено фото от {user.first_name} (ID: {user.id}). File ID: {photo_file_id}")
+        logging.info(f"Получено {len(photos)} фото от {user.first_name} (ID: {user.id}).")
 
-        await update.message.reply_text("Фото получено! Пожалуйста, введите текст отзыва или подтвердите отправку.")
+        await update.message.reply_text("Фото получены! Пожалуйста, введите текст отзыва или подтвердите отправку.")
     except Exception as e:
         logging.error(f"Ошибка при обработке фото: {e}")
         await update.message.reply_text("Произошла ошибка при обработке вашего отзыва. Попробуйте еще раз.")
