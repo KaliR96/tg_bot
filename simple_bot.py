@@ -611,33 +611,24 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         elif query.data.startswith('delete_'):
             review_index = int(query.data.split('_')[1])
             pending_reviews = [review for review in reviews if not review.get('approved', False)]
+
             if 0 <= review_index < len(pending_reviews):
                 reviews.remove(pending_reviews[review_index])
                 await query.edit_message_text(text="Отзыв безвозвратно удален.")
 
-        # Обновляем список только неопубликованных отзывов после публикации или удаления
-        reviews = context.application.bot_data.get('reviews', [])
-        pending_reviews = [review for review in reviews if not review.get('approved', False)]
+            # Обновляем список только неопубликованных отзывов после удаления
+            pending_reviews = [review for review in reviews if not review.get('approved', False)]
 
-        # Отображаем обновленный список оставшихся отзывов
-        if not pending_reviews:
-            # Этот блок был удален, чтобы не отправлять сообщения администратору после обработки всех отзывов.
-            context.user_data['state'] = 'admin_menu'
-            return
-
-        else:
-            for i, review in enumerate(pending_reviews):
-                review_text = f"{i + 1}. {review['review']} - На рассмотрении"
-                buttons = [
-                    [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                     InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
-                ]
-                reply_markup = InlineKeyboardMarkup(buttons)
-                await context.bot.send_message(chat_id=query.message.chat_id, text=review_text,
-                                               reply_markup=reply_markup)
+            # Если больше нет отзывов для обработки, возвращаемся в админ меню
+            if not pending_reviews:
+                await context.bot.send_message(chat_id=query.message.chat_id, text="Все отзывы обработаны.")
+                context.user_data['state'] = 'admin_menu'
+                return
 
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
+        await context.bot.send_message(chat_id=ADMIN_ID,
+                                       text=f"Произошла ошибка при обработке нажатия кнопки: {e}")
 
 
 def calculate(price_per_sqm, sqm):
