@@ -281,43 +281,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
             return
 
-    # Проверяем, если пользователь администратор и обрабатываем модерацию отзывов
+    # Добавляем проверку, чтобы избежать повторного считывания списка отзывов и дублирования
     if user_id == ADMIN_ID and user_state == 'admin_menu':
         if update.message.text.strip() == 'Модерация':
-            reviews = context.application.bot_data.get('reviews', [])
-            pending_reviews = [review for review in reviews if not review.get('approved', False)]
-
-            if not pending_reviews:
-                await send_message(update, context, "Нет отзывов для модерации.",
-                                   MENU_TREE['admin_menu']['options'])
-                context.user_data['state'] = 'admin_menu'
-                return
-
-            for i, review in enumerate(pending_reviews):
-                try:
-                    # Пересылаем оригинальное сообщение пользователя админу
-                    await context.bot.forward_message(
-                        chat_id=ADMIN_ID,
-                        from_chat_id=review['user_id'],
-                        message_id=review['message_id']
-                    )
-
-                    # Добавляем кнопки для модерации (публикация или удаление отзыва)
-                    buttons = [
-                        [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                         InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
-                    ]
-                    reply_markup = InlineKeyboardMarkup(buttons)
-
-                    # Отправляем админу сообщение с кнопками для модерации
-                    await context.bot.send_message(chat_id=ADMIN_ID, text="Выберите действие:",
-                                                   reply_markup=reply_markup)
-
-                except Exception as e:
-                    logger.error(f"Ошибка при пересылке сообщения: {e}")
-
-                # Отправляем админу сообщение с кнопками для модерации
-                #await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
+            await moderate_reviews(update, context, user_state)
+            return
 
     # Обработка нажатия кнопки "Посмотреть Отзывы💬"
     if user_state == 'reviews_menu' and update.message.text.strip() == 'Посмотреть Отзывы💬':
@@ -519,28 +487,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                            menu['options'])
 
 
-# Функция для публикации отзывов в канал
-async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
-    try:
-        # Отправляем текст отзыва в канал, если он есть
-        if review.get('review'):
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
-
-        # Отправляем фотографии отзыва в канал, если они есть
-        photo_ids = review.get('photo_file_ids', [])
-        if photo_ids:
-            media_group = [InputMediaPhoto(photo_id) for photo_id in photo_ids]
-            await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
-
-        review['approved'] = True
-        logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
-    except Exception as e:
-        logger.error(f"Ошибка при публикации отзыва: {e}")
-        # Можно отправить сообщение администратору о неудачной публикации
-        await context.bot.send_message(chat_id=ADMIN_ID,
-                                       text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
-
-
 async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state: str) -> None:
     if 'pending_reviews' not in context.user_data:
         reviews = context.application.bot_data.get('reviews', [])
@@ -629,6 +575,28 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
         await context.bot.send_message(chat_id=ADMIN_ID,
                                        text=f"Произошла ошибка при обработке нажатия кнопки: {e}")
+
+
+# Функция для публикации отзывов в канал
+async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
+    try:
+        # Отправляем текст отзыва в канал, если он есть
+        if review.get('review'):
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=review['review'])
+
+        # Отправляем фотографии отзыва в канал, если они есть
+        photo_ids = review.get('photo_file_ids', [])
+        if photo_ids:
+            media_group = [InputMediaPhoto(photo_id) for photo_id in photo_ids]
+            await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+
+        review['approved'] = True
+        logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
+    except Exception as e:
+        logger.error(f"Ошибка при публикации отзыва: {e}")
+        # Можно отправить сообщение администратору о неудачной публикации
+        await context.bot.send_message(chat_id=ADMIN_ID,
+                                       text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
 
 
 def calculate(price_per_sqm, sqm):
