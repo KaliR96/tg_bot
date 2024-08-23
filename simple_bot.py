@@ -185,10 +185,10 @@ for tariff_name, details in CLEANING_DETAILS.items():
     MENU_TREE[f'detail_{tariff_name}'] = {
         'message': details['details_text'],
         'image_path': details['image_path'],
-        'options': ['Калькулятор🧮', 'Назад'],  # Заменяем "В начало🔙" на "Назад"
+        'options': ['Калькулятор🧮', 'Назад'],
         'next_state': {
             'Калькулятор🧮': 'calculator_menu',
-            'Назад': 'show_tariffs'  # Возвращаемся к списку тарифов
+            'Назад': 'show_tariffs'
         }
     }
 
@@ -531,22 +531,24 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.answer()
 
         user_state = context.user_data.get('state', 'main_menu')
+        callback_data = query.data
 
+        # Обработка нажатия кнопки в меню модерации
         if user_state == 'moderation_menu':
-            review_index = int(query.data.split('_')[1])
+            review_index = int(callback_data.split('_')[1])
 
             pending_reviews = context.user_data.get('pending_reviews', [])
 
             if 0 <= review_index < len(pending_reviews):
                 review = pending_reviews[review_index]
 
-                if query.data.startswith('delete_'):
+                if callback_data.startswith('delete_'):
                     review['deleted'] = True
                     await query.edit_message_text(text="Отзыв безвозвратно удален.")
                     # Убираем отзыв из списка в bot_data
                     context.application.bot_data['reviews'].remove(review)
 
-                elif query.data.startswith('publish_'):
+                elif callback_data.startswith('publish_'):
                     review['approved'] = True
                     await publish_review(context, review)
                     await query.edit_message_text(text="Отзыв успешно опубликован.")
@@ -571,6 +573,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                            reply_markup=ReplyKeyboardMarkup([['Админ меню']], resize_keyboard=True))
 
             context.user_data['state'] = 'moderation_menu'
+
+        # Обработка нажатия кнопки "Показать номер" в меню "Связаться"
+        elif callback_data == 'show_phone_number':
+            phone_number = "+7 995 612 45 81"  # Ваш номер телефона
+            await query.message.reply_text(f" {phone_number}")
 
     except Exception as e:
         logger.error(f"Произошла ошибка в обработке нажатия кнопки: {e}")
@@ -609,7 +616,17 @@ async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> No
 
 def calculate(price_per_sqm, sqm):
     total_cost = price_per_sqm * sqm
-    formatted_message = f'Стоимость вашей уборки: {total_cost:.2f} руб.'
+
+    # Проверка минимальной стоимости
+    if total_cost < 1500:
+        total_cost = 1500
+        formatted_message = (
+            f'Стоимость вашей уборки: 1500.00 руб.\n'
+            'Это минимальная стоимость заказа.'
+        )
+    else:
+        formatted_message = f'Стоимость вашей уборки: {total_cost:.2f} руб.'
+
     return {
         'total_cost': total_cost,
         'formatted_message': formatted_message
@@ -619,7 +636,17 @@ def calculate(price_per_sqm, sqm):
 # Функция для расчета стоимости мытья окон
 def calculate_windows(price_per_panel, num_panels):
     total_cost = price_per_panel * num_panels
-    formatted_message = f'Стоимость мытья окон: {total_cost:.2f} руб. за {num_panels} створок(и).'
+
+    # Проверка минимальной стоимости
+    if total_cost < 1500:
+        total_cost = 1500
+        formatted_message = (
+            f'Стоимость мытья окон: 1500.00 руб.\n'
+            'Это минимальная стоимость заказа.'
+        )
+    else:
+        formatted_message = f'Стоимость мытья окон: {total_cost:.2f} руб. за {num_panels} створок(и).'
+
     return {
         'total_cost': total_cost,
         'formatted_message': formatted_message
