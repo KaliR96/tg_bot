@@ -213,78 +213,45 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info("Отправлено сообщение с кнопками: %s", message)
 
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        user = update.message.from_user
-        photos = update.message.photo  # Получаем все фото
-
-        # Сохраняем ID файлов фото в user_data
+def handle_photos(update, context):
+    if update.message.photo:
         if 'photo_file_ids' not in context.user_data:
             context.user_data['photo_file_ids'] = []
-        for photo in photos:
-            context.user_data['photo_file_ids'].append(photo.file_id)
 
-        logging.info(f"Получено {len(photos)} фото от {user.first_name} (ID: {user.id}).")
+        # Сохраняем только уникальные file_id, чтобы избежать дублирования
+        photo_ids = [photo.file_id for photo in update.message.photo]
+        context.user_data['photo_file_ids'].extend(photo_ids)
 
-        await update.message.reply_text("Фото получены! Пожалуйста, введите текст отзыва или подтвердите отправку.")
-    except Exception as e:
-        logging.error(f"Ошибка при обработке фото: {e}")
-        await update.message.reply_text("Произошла ошибка при обработке вашего отзыва. Попробуйте еще раз.")
+        # Удаляем дублирующиеся элементы в списке
+        context.user_data['photo_file_ids'] = list(set(context.user_data['photo_file_ids']))
 
 
 # Универсальная функция для обработки текстовых сообщений и фотографий
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.message.from_user.id  # Получаем ID пользователя
-    user_state = context.user_data.get('state', 'main_menu')  # Получаем текущее состояние пользователя
+    user_id = update.message.from_user.id
+    user_state = context.user_data.get('state', 'main_menu')
     logger.info("Текущее состояние: %s", user_state)
 
     if user_state == 'write_review':
-        review_text = update.message.text.strip() if update.message.text else ""  # Получаем текст отзыва
-        user_name = update.message.from_user.full_name  # Получаем имя пользователя
-        message_id = update.message.message_id  # Получаем ID сообщения
+        # Сохраняем отзыв без немедленной пересылки администратору
+        review_data = {
+            'user_id': user_id,
+            'chat_id': update.message.chat_id,
+            'message_id': update.message.message_id,
+            'review_text': update.message.text,
+            'photo_file_ids': [photo.file_id for photo in update.message.photo] if update.message.photo else []
+        }
+        context.application.bot_data.setdefault('pending_reviews', []).append(review_data)
 
-        # Проверяем, есть ли фотографии в сообщении
-        if update.message.photo:
-            if 'photo_file_ids' not in context.user_data:
-                context.user_data['photo_file_ids'] = []
-            # Сохраняем все фото из сообщения
-            for photo in update.message.photo:
-                context.user_data['photo_file_ids'].append(photo.file_id)
-
-        # Если текст и/или фото переданы
-        if review_text or 'photo_file_ids' in context.user_data:
-            # Формируем данные отзыва
-            review_data = {
-                'review': review_text,
-                'user_name': user_name,
-                'user_id': user_id,
-                'message_id': message_id,
-                'approved': False,
-                'photo_file_ids': context.user_data.get('photo_file_ids', [])
-            }
-
-            # Сохраняем отзыв в бот-данные
-            context.application.bot_data.setdefault('reviews', []).append(review_data)
-            context.user_data.pop('photo_file_ids', None)  # Очищаем временные данные о фото
-
-            logger.info(
-                f"Отзыв сохранен: {review_text} от {user_name} (ID: {user_id}, Message ID: {message_id}, Photos: {len(review_data['photo_file_ids'])})")
-
-            # Отправляем сообщение пользователю о том, что отзыв получен
-            await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
-                               MENU_TREE['main_menu']['options'])
-            context.user_data['state'] = 'main_menu'  # Возвращаем пользователя в главное меню
-            return
-
-        # Если фото было отправлено, но текст ещё не введён, продолжаем ожидать текст отзыва
-        if 'photo_file_ids' in context.user_data:
-            await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
-            return
+        # Отправляем сообщение пользователю о том, что отзыв получен
+        await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.", MENU_TREE['main_menu']['options'])
+        context.user_data['state'] = 'main_menu'  # Возвращаем пользователя в главное меню
+        return
 
     # Добавляем проверку, чтобы избежать повторного считывания списка отзывов и дублирования
     if user_id == ADMIN_ID and user_state == 'admin_menu':
         if update.message.text.strip() == 'Модерация':
-            await moderate_reviews(update, context, user_state)
+            await moderate_reviews(update, context)
             return
 
     # Обработка нажатия кнопки "Посмотреть Отзывы💬"
@@ -322,18 +289,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                        MENU_TREE['admin_menu']['options'])
                     context.user_data['state'] = 'admin_menu'
                     return
-
-                '''for i, review in enumerate(pending_reviews):
-                    review_text = f"{i + 1}. {review['review']} - На рассмотрении"
-                    buttons = [
-                        [InlineKeyboardButton("Опубликовать✅", callback_data=f'publish_{i}'),
-                         InlineKeyboardButton("Удалить🗑️", callback_data=f'delete_{i}')]
-                    ]
-                    reply_markup = InlineKeyboardMarkup(buttons)
-                    await update.message.reply_text(review_text, reply_markup=reply_markup)
-
-                context.user_data['state'] = 'moderation_menu'
-                return'''
 
         elif user_state == 'moderation_menu':
             if update.message.text.strip() == 'Админ меню':
@@ -487,41 +442,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                            menu['options'])
 
 
-async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state: str) -> None:
-    if 'pending_reviews' not in context.user_data:
-        reviews = context.application.bot_data.get('reviews', [])
-        context.user_data['pending_reviews'] = [review for review in reviews if not review.get('approved', False)]
-
-    pending_reviews = context.user_data['pending_reviews']
+async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pending_reviews = context.application.bot_data.get('pending_reviews', [])
 
     if not pending_reviews:
         await send_message(update, context, "Нет отзывов для модерации.", MENU_TREE['admin_menu']['options'])
-        context.user_data['state'] = 'admin_menu'
         return
 
-    for i, review in enumerate(pending_reviews):
+    for review in pending_reviews:
         try:
-            if not review.get('deleted', False):
-                # Пересылаем оригинальное сообщение пользователя с текстом и фотографиями
-                await context.bot.forward_message(
-                    chat_id=ADMIN_ID,
-                    from_chat_id=review['user_id'],
-                    message_id=review['message_id']
-                )
-
-                buttons = [
-                    [InlineKeyboardButton(f"Опубликовать✅", callback_data=f'publish_{i}'),
-                     InlineKeyboardButton(f"Удалить🗑️", callback_data=f'delete_{i}')]
-                ]
-                reply_markup = InlineKeyboardMarkup(buttons)
-
-                await context.bot.send_message(chat_id=ADMIN_ID, text="Выберите действие:", reply_markup=reply_markup)
-            else:
-                await context.bot.send_message(chat_id=ADMIN_ID, text="Отзыв удален.")
+            # Пересылаем оригинальное сообщение пользователя администратору для модерации
+            await context.bot.forward_message(
+                chat_id=ADMIN_ID,
+                from_chat_id=review['chat_id'],
+                message_id=review['message_id']
+            )
+            # Дополнительно пересылаем фотографии, если они есть
+            if review['photo_file_ids']:
+                media = [InputMediaPhoto(photo_id) for photo_id in review['photo_file_ids']]
+                await context.bot.send_media_group(chat_id=ADMIN_ID, media=media)
         except Exception as e:
-            logger.error(f"Ошибка при пересылке сообщения: {e}")
+            logger.error(f"Ошибка при пересылке сообщения на модерацию: {e}")
 
-    context.user_data['state'] = 'moderation_menu'
+    # После успешной модерации очищаем список ожидающих отзывов
+    context.application.bot_data['pending_reviews'] = []
 
 
 # Обновленная функция для обработки нажатий на inline-кнопки
@@ -590,26 +534,24 @@ async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> No
     try:
         # Проверяем, есть ли фотографии в отзыве
         photo_ids = review.get('photo_file_ids', [])
+
+        # Форвардим оригинальное сообщение с текстом и фотографиями администратору
+        await context.bot.forward_message(
+            chat_id=ADMIN_ID,
+            from_chat_id=review['user_id'],
+            message_id=review['message_id']
+        )
+
+        # Если есть фотографии, отправляем их администратору отдельным сообщением
         if photo_ids:
-            # Если есть фотографии, форвардим сообщение с фотографиями
-            await context.bot.forward_message(
-                chat_id=CHANNEL_ID,
-                from_chat_id=review['user_id'],
-                message_id=review['message_id']
-            )
-        else:
-            # Если фотографий нет, форвардим текстовое сообщение
-            await context.bot.forward_message(
-                chat_id=CHANNEL_ID,
-                from_chat_id=review['user_id'],
-                message_id=review['message_id']
-            )
+            media_group = [InputMediaPhoto(photo_id) for photo_id in photo_ids]
+            await context.bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
 
         review['approved'] = True
         logger.info(f"Отзыв от {review['user_name']} успешно опубликован в канал.")
     except Exception as e:
         logger.error(f"Ошибка при публикации отзыва: {e}")
-        # Можно отправить сообщение администратору о неудачной публикации
+        # Сообщение администратору о неудачной публикации
         await context.bot.send_message(chat_id=ADMIN_ID,
                                        text=f"Не удалось опубликовать отзыв от {review['user_name']}. Ошибка: {e}")
 
