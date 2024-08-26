@@ -1,0 +1,3 @@
+[submodule "tg_bot"]
+	path = tg_bot
+	url = https://github.com/KaliR96/tg_bot.git
