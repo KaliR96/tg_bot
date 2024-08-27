@@ -492,9 +492,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state: str) -> None:
+    # Если уже есть не обработанные отзывы в context.user_data, добавляем к ним новые
     if 'pending_reviews' not in context.user_data:
-        reviews = context.application.bot_data.get('reviews', [])
-        context.user_data['pending_reviews'] = [review for review in reviews if not review.get('approved', False)]
+        context.user_data['pending_reviews'] = []
+
+    # Получаем список всех новых отзывов, которые еще не обработаны
+    new_reviews = [review for review in context.application.bot_data.get('reviews', [])
+                   if not review.get('approved', False) and not review.get('deleted', False)]
+
+    # Добавляем новые отзывы к уже существующим не обработанным отзывам
+    context.user_data['pending_reviews'].extend(new_reviews)
+
+    # Удаляем дубликаты (если вдруг один и тот же отзыв оказался в списке дважды)
+    context.user_data['pending_reviews'] = list({review['message_id']: review for review in context.user_data['pending_reviews']}.values())
 
     pending_reviews = context.user_data['pending_reviews']
 
@@ -502,6 +512,10 @@ async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE, u
         await send_message(update, context, "Нет отзывов для модерации.", MENU_TREE['admin_menu']['options'])
         context.user_data['state'] = 'admin_menu'
         return
+
+    # Отправляем сообщение с кнопкой "Админ меню" в начале модерации
+    await context.bot.send_message(chat_id=ADMIN_ID, text="Начинается модерация отзывов.",
+                                   reply_markup=ReplyKeyboardMarkup([['Админ меню']], resize_keyboard=True))
 
     for i, review in enumerate(pending_reviews):
         try:
@@ -568,10 +582,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 context.user_data.pop('pending_reviews', None)
                 context.user_data['state'] = 'admin_menu'
                 return
-
-            # Администратор может вернуться в админ-меню или продолжить модерацию
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Вернуться в админ меню:",
-                                           reply_markup=ReplyKeyboardMarkup([['Админ меню']], resize_keyboard=True))
 
             context.user_data['state'] = 'moderation_menu'
 
