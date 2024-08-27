@@ -212,7 +212,7 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(message, reply_markup=keyboard)
     logger.info("Отправлено сообщение с кнопками: %s", message)
 
-
+#
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = update.message.from_user
