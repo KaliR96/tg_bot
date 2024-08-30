@@ -225,22 +225,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         message_id = update.message.message_id
         user_name = update.message.from_user.full_name
 
-        # Сохраняем отзыв как единое сообщение
-        review_data = {
-            'review': review_text,
-            'user_name': user_name,
-            'user_id': user_id,
-            'message_id': message_id,  # Сохраняем полный message_id для пересылки целого сообщения
-            'approved': False
-        }
+        if review_text == MENU_TREE['write_review']['options'][0]:
+            await send_message(update, context, "Главное меню", MENU_TREE['main_menu']['options'])
+            context.user_data['state'] = 'main_menu'
+            return
+        elif review_text == '':
+            # Сохраняем отзыв как единое сообщение
+            review_data = {
+                'review': review_text,
+                'user_name': user_name,
+                'user_id': user_id,
+                'message_id': message_id,  # Сохраняем полный message_id для пересылки целого сообщения
+                'approved': False
+            }
 
-        context.application.bot_data.setdefault('reviews', []).append(review_data)
-        logger.info("Отправка сообщения с благодарностью пользователю.")
+            context.application.bot_data.setdefault('reviews', []).append(review_data)
+            logger.info("Отправка сообщения с благодарностью пользователю.")
 
-        await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
-                           MENU_TREE['main_menu']['options'])
-        context.user_data['state'] = 'main_menu'
-        return
+            # await update.message.reply_text("Спасибо за ваш отзыв! Он будет добавлен через некоторое время.")
+            # await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.", MENU_TREE['write_review']['options'])
+            context.user_data['state'] = 'write_review'
+            return
+        else:
+            # Сохраняем отзыв как единое сообщение
+            review_data = {
+                'review': review_text,
+                'user_name': user_name,
+                'user_id': user_id,
+                'message_id': message_id,  # Сохраняем полный message_id для пересылки целого сообщения
+                'approved': False
+            }
+
+            context.application.bot_data.setdefault('reviews', []).append(review_data)
+            logger.info("Отправка сообщения с благодарностью пользователю.")
+
+            # await update.message.reply_text("Спасибо за ваш отзыв! Он будет добавлен через некоторое время.")
+            await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.", MENU_TREE['write_review']['options'])
+            context.user_data['state'] = 'write_review'
+            return
 
 
         # # Логирование перед вызовом send_message в других состояниях
