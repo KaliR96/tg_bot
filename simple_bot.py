@@ -213,17 +213,37 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info("Отправлено сообщение с кнопками: %s", message)
 
 
+# Обновляем сохранение уникальных ID файлов фото
+def add_unique_photos(photo_ids, user_data):
+    # Инициализируем список фото, если он еще не существует
+    if 'photo_file_ids' not in user_data:
+        user_data['photo_file_ids'] = []
+
+    # Добавляем только уникальные ID, проверяя каждое фото
+    for photo_id in photo_ids:
+        if photo_id not in user_data['photo_file_ids']:
+            user_data['photo_file_ids'].append(photo_id)
+
+
+# Основной код
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = update.message.from_user
-        photo_file_id = update.message.photo[-1].file_id  # Получаем ID файла фото
 
-        # Сохраняем ID файла фото в user_data
+        # Получаем все ID файлов фото из сообщения
+        photo_file_ids = [photo.file_id for photo in update.message.photo]
+
+        # Проверяем наличие сохраненных ID файлов фото в user_data
         if 'photo_file_ids' not in context.user_data:
-            context.user_data['photo_file_ids'] = []
-        context.user_data['photo_file_ids'].append(photo_file_id)
+            context.user_data['photo_file_ids'] = []  # Используем список для сохранения ID файлов фото
 
-        logging.info(f"Получено фото от {user.first_name} (ID: {user.id}). File ID: {photo_file_id}")
+        # Добавляем все ID фото из текущего сообщения в user_data, избегая дублирования
+        for photo_id in photo_file_ids:
+            if photo_id not in context.user_data['photo_file_ids']:
+                context.user_data['photo_file_ids'].append(photo_id)
+
+        logging.info(
+            f"Получено {len(photo_file_ids)} фото от {user.first_name} (ID: {user.id}). Всего фото сохранено: {len(context.user_data['photo_file_ids'])}")
 
         await update.message.reply_text("Фото получено! Пожалуйста, введите текст отзыва или подтвердите отправку.")
     except Exception as e:
@@ -233,34 +253,36 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Универсальная функция для обработки текстовых сообщений и фотографий
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.message.from_user.id  # Получаем ID пользователя
-    user_state = context.user_data.get('state', 'main_menu')  # Получаем текущее состояние пользователя
+    user_id = update.message.from_user.id
+    user_state = context.user_data.get('state', 'main_menu')
     logger.info("Текущее состояние: %s", user_state)
 
     if user_state == 'write_review':
-        review_text = update.message.text.strip() if update.message.text else ""  # Получаем текст отзыва
-        user_name = update.message.from_user.full_name  # Получаем имя пользователя
-        message_id = update.message.message_id  # Получаем ID сообщения
+        # Получаем основной текст или подпись к фото
+        review_text = update.message.caption or update.message.text or ""
+        user_name = update.message.from_user.full_name
+        message_id = update.message.message_id
 
-        # Проверяем, есть ли фотографии в сообщении
+        # Проверяем наличие фото и добавляем их ID в список
         if update.message.photo:
-            photo_file_id = update.message.photo[-1].file_id  # Получаем ID файла фотографии (с наибольшим разрешением)
+            photo_file_ids = [photo.file_id for photo in update.message.photo]  # Получаем все ID фото
             if 'photo_file_ids' not in context.user_data:
-                context.user_data['photo_file_ids'] = []  # Создаём список для хранения ID фотографий
-            context.user_data['photo_file_ids'].append(photo_file_id)  # Добавляем ID фотографии в список
+                context.user_data['photo_file_ids'] = []  # Используем список для хранения ID файлов фото
 
-            logger.info(f"Получено фото от {user_name} (ID: {user_id}). File ID: {photo_file_id}")
+            # Добавляем только уникальные ID фото
+            for photo_id in photo_file_ids:
+                if photo_id not in context.user_data['photo_file_ids']:
+                    context.user_data['photo_file_ids'].append(photo_id)
 
-        # Если текст и/или фото переданы
-        if review_text or 'photo_file_ids' in context.user_data:
-            # Формируем данные отзыва
+        # Проверяем наличие текста и/или фото
+        if review_text.strip() or 'photo_file_ids' in context.user_data:  # Проверяем наличие текста или фото
             review_data = {
-                'review': review_text,
+                'review': review_text.strip(),
                 'user_name': user_name,
                 'user_id': user_id,
                 'message_id': message_id,
                 'approved': False,
-                'photo_file_ids': context.user_data.get('photo_file_ids', [])
+                'photo_file_ids': list(context.user_data.get('photo_file_ids', []))
             }
 
             # Сохраняем отзыв в бот-данные
@@ -270,39 +292,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             logger.info(
                 f"Отзыв сохранен: {review_text} от {user_name} (ID: {user_id}, Message ID: {message_id}, Photos: {len(review_data['photo_file_ids'])})")
 
-            # Отправляем сообщение пользователю о том, что отзыв получен
             await send_message(update, context, "Спасибо за ваш отзыв! Он будет добавлен через некоторое время.",
                                MENU_TREE['main_menu']['options'])
-            context.user_data['state'] = 'main_menu'  # Возвращаем пользователя в главное меню
+            context.user_data['state'] = 'main_menu'
             return
 
         # Если фото было отправлено, но текст ещё не введён, продолжаем ожидать текст отзыва
         if 'photo_file_ids' in context.user_data:
             await update.message.reply_text("Фото получено. Пожалуйста, введите текст отзыва.")
             return
+    # Проверка наличия текста перед вызовом .strip()
+    user_choice = update.message.text.strip() if update.message.text else None
 
-    # Добавляем проверку, чтобы избежать повторного считывания списка отзывов и дублирования
-    if user_id == ADMIN_ID and user_state == 'admin_menu':
-        if update.message.text.strip() == 'Модерация':
-            await moderate_reviews(update, context, user_state)
-            return
-
-    # Обработка нажатия кнопки "Посмотреть Отзывы💬"
-    if user_state == 'reviews_menu' and update.message.text.strip() == 'Посмотреть Отзывы💬':
-        channel_url = "https://t.me/CleaningSphere"  # Замените на реальную ссылку на канал
-        await update.message.reply_text(f"Просмотрите все отзывы на нашем канале: {channel_url}")
-
-        reply_keyboard = [['В начало🔙']]
-        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
-        await update.message.reply_text("Вернуться в главное меню:", reply_markup=reply_markup)
-
-        context.user_data['state'] = 'main_menu'
+    if user_choice is None:
+        logger.info("Пользователь отправил сообщение без текста.")
         return
 
-    # Обработка нажатия кнопки "Назад" при показе тарифов
-    if user_state.startswith('detail_') and update.message.text.strip() == 'Назад':
-        context.user_data['state'] = 'show_tariffs'
-        await send_message(update, context, MENU_TREE['show_tariffs']['message'], MENU_TREE['show_tariffs']['options'])
+    if user_choice == 'В начало🔙':
+        context.user_data['state'] = 'main_menu'
+        menu = MENU_TREE['main_menu']
+        await send_message(update, context, menu['message'], menu['options'])
         return
 
     if user_id == ADMIN_ID:
@@ -368,6 +377,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         menu = MENU_TREE['main_menu']
         await send_message(update, context, menu['message'], menu['options'])
         return
+
+    if user_choice is None:
+        # Если пользователь отправил сообщение без текста (например, только фото), продолжайте обрабатывать это сообщение
+        logger.info("Пользователь отправил сообщение без текста.")
+        # Здесь можно добавить дополнительную логику для обработки случаев, когда текста нет.
 
     # Обработка выбора тарифа в Калькуляторе🧮
     if user_state == 'calculator_menu' and user_choice in CLEANING_PRICES:
@@ -502,11 +516,21 @@ async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE, u
     for i, review in enumerate(pending_reviews):
         try:
             if not review.get('deleted', False):
+                # Пересылаем сам отзыв целиком админу
                 await context.bot.forward_message(
                     chat_id=ADMIN_ID,
                     from_chat_id=review['user_id'],
                     message_id=review['message_id']
                 )
+
+                # Отправляем группу медиа-файлов админу, если есть фото
+                if review['photo_file_ids']:
+                    media_group = []
+                    for photo_id in review['photo_file_ids']:
+                        media_group.append(InputMediaPhoto(photo_id))
+
+                    # Отправляем медиагруппу админу
+                    await context.bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
 
                 buttons = [
                     [InlineKeyboardButton(f"Опубликовать✅", callback_data=f'publish_{i}'),
