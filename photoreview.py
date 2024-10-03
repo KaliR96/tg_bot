@@ -1,21 +1,35 @@
 # -*- coding: utf-8 -*-
 
 import logging
+from telegram import Bot
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import os
 
 # Настраиваем логирование
+# Настраиваем логирование
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
 logger = logging.getLogger(__name__)
+
 # ID вашего канала
 CHANNEL_ID = -1002249882445
+
+# Канал для рассылок
+BROADCAST_CHANNEL_ID = -1002436588982
+
 # Укажите ваш Telegram ID
 ADMIN_ID = 1238802718  # Замените на ваш реальный Telegram ID
+
+# Список пользователей, подписанных на рассылку
+subscribed_users = set()
+
 
 # Цены на квадратный метр для каждого типа уборки
 CLEANING_PRICES = {
@@ -194,17 +208,36 @@ for tariff_name, details in CLEANING_DETAILS.items():
     }
 
 
-# Функция для отправки сообщения с клавиатурой
+# Функция для отправки сообщения с меню
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, options: list) -> None:
-    # Проверяем, что `options` это список списков
-    if isinstance(options[0], list):
+
+    if isinstance(options[0], list):  # Если это список списков
         reply_markup = ReplyKeyboardMarkup(options, resize_keyboard=True, one_time_keyboard=True)
     else:
-        # Если `options` - это просто список, преобразуем его в список списков
+        # Преобразуем в список списков, если это просто список
         reply_markup = ReplyKeyboardMarkup([options], resize_keyboard=True, one_time_keyboard=True)
 
     await update.message.reply_text(message, reply_markup=reply_markup)
     logger.info("Отправлено сообщение: %s", message)
+
+
+
+# Функция для отправки сообщения подписчикам
+async def send_message_to_subscribers(bot: Bot, message: str) -> None:
+    for user_id in subscribed_users:
+        try:
+            await bot.send_message(chat_id=user_id, text=message)
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
+
+# Обработчик сообщений из канала
+async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.channel_post and update.channel_post.chat_id == BROADCAST_CHANNEL_ID:  # Проверяем, что сообщение из нужного канала
+        message = update.channel_post.text  # Получаем текст сообщения из канала
+        logger.info(f"Получено сообщение из канала: {message}")
+
+        # Пересылаем сообщение всем подписанным пользователям
+        await send_message_to_subscribers(context.bot, message)
 
 
 # Функция для отправки сообщения с inline-кнопками
@@ -215,9 +248,37 @@ async def send_inline_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.message.from_user.id
-    user_state = context.user_data.get('state', 'main_menu')
-    logger.info("Текущее состояние: %s", user_state)
+    # Инициализируем user_state значением 'main_menu' по умолчанию
+    user_state = 'main_menu'
+
+    # Проверка, что update содержит сообщение от пользователя
+    if update.message and update.message.from_user:
+        user_id = update.message.from_user.id  # Получаем ID пользователя
+        user_state = context.user_data.get('state', 'main_menu')
+        logger.info("Текущее состояние: %s", user_state)
+
+        # Логика для администратора
+        if user_id == ADMIN_ID:
+            if user_state == 'main_menu':
+                context.user_data['state'] = 'admin_menu'
+                menu = MENU_TREE['admin_menu']
+                await send_message(update, context, menu['message'], menu['options'])
+                return
+            elif user_state == 'admin_menu':
+                if update.message.text.strip() == 'Модерация':
+                    reviews = context.application.bot_data.get('reviews', [])
+                    pending_reviews = [review for review in reviews if not review.get('approved', False)]
+                    if not pending_reviews:
+                        await send_message(update, context, "Нет отзывов для модерации.", MENU_TREE['admin_menu']['options'])
+                    context.user_data['state'] = 'admin_menu'
+                    return
+            elif user_state == 'moderation_menu':
+                if update.message.text.strip() == 'Админ меню':
+                    context.user_data['state'] = 'admin_menu'
+                    menu = MENU_TREE['admin_menu']
+                    await send_message(update, context, menu['message'], menu['options'])
+                    return
+            return  # Выход, если это админ
 
     if user_state == 'write_review':
         # Сохраняем ID текущего сообщения с текстом и медиа
@@ -264,13 +325,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data['state'] = 'write_review'
             return
 
-
-        # # Логирование перед вызовом send_message в других состояниях
-        # if user_id == ADMIN_ID and user_state == 'admin_menu':
-        #     if update.message.text.strip() == 'Модерация':
-        #         logger.info("Вызываем send_message для администраторского меню.")
-        #         await moderate_reviews(update, context, user_state)
-        #         return
 
     # Обработка нажатия кнопки "Посмотреть Отзывы💬"
     if user_state == 'reviews_menu' and update.message.text and update.message.text.strip() == 'Посмотреть Отзывы💬':
@@ -594,13 +648,21 @@ def calculate_windows(price_per_panel, num_panels):
     }
 
 
-# Функция для обработки команды /start
+# Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.message.chat_id
     user_id = update.message.from_user.id
+
+    # Проверка, является ли пользователь администратором
     if user_id == ADMIN_ID:
         context.user_data['state'] = 'admin_menu'
         menu = MENU_TREE['admin_menu']
     else:
+        # Добавляем пользователя в список подписчиков, если его там еще нет
+        if chat_id not in subscribed_users:
+            subscribed_users.add(chat_id)
+            logger.info(f"Пользователь {chat_id} подписан на рассылку.")
+
         context.user_data['state'] = 'main_menu'
         menu = MENU_TREE['main_menu']
 
@@ -620,6 +682,9 @@ def main():
 
     # Добавляем обработчик текстовых сообщений
     application.add_handler(MessageHandler(filters.TEXT | filters.PHOTO & ~filters.COMMAND, handle_message))
+
+    # Обработчик сообщений из канала
+    application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, handle_channel_post))
 
     # Добавляем обработчик inline-кнопок
     application.add_handler(CallbackQueryHandler(button_click))
