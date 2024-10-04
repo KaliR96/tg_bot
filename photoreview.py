@@ -458,8 +458,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             extras_options = [
                 ['Глажка белья', 'Стирка белья'],
                 ['Почистить лоток', 'Уход за цветами'],
-                ['Мытье окон🧴', 'Закончить расчет'],
-                ['В начало🔙']
+                ['Мытье окон🧴'],
+                ['В начало🔙', 'Связаться📞']
             ]
             await send_message(update, context, "Хотите добавить дополнительные услуги?", extras_options)
             context.user_data['state'] = 'add_extras'
@@ -489,13 +489,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             # Сохраняем выбранные дополнительные услуги в user_data
             context.user_data.setdefault('selected_extras', []).append(user_choice)
 
-            # Продолжаем выбор допуслуг
+            # Продолжаем выбор допуслуг, показываем те же кнопки, пока пользователь не выберет "Связаться📞" или "В начало🔙"
             await send_message(update, context,
-                               f"Услуга {user_choice} добавлена. Общая стоимость: {context.user_data['total_cost']} руб.\nВыберите еще услуги или закончите расчет.",
-                               MENU_TREE['add_extras']['options'])
+                               f"Услуга {user_choice} добавлена. Общая стоимость: {context.user_data['total_cost']} руб.\nВыберите еще услуги или свяжитесь с нами.",
+                               [['Глажка белья', 'Стирка белья'],
+                                ['Почистить лоток', 'Уход за цветами'],
+                                ['Мытье окон🧴', 'Связаться📞'],
+                                ['В начало🔙']])
+            context.user_data['state'] = 'add_extras'
 
-        elif user_choice == 'Закончить расчет':
-            # Завершаем расчет и выводим результат
+        elif user_choice == 'Связаться📞':
+            # Завершаем расчет и переходим в состояние "Связаться"
             total_cost = context.user_data['total_cost']
             selected_extras = ", ".join(context.user_data.get('selected_extras', []))
 
@@ -506,9 +510,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
             await send_message(update, context, final_message, MENU_TREE['calculate_result']['options'])
 
-            # Сбрасываем состояние и очищаем список доп. услуг
+            # Переход в состояние "Связаться📞"
+            context.user_data['state'] = 'contact'
+            buttons = [
+                [InlineKeyboardButton("WhatsApp", url="https://wa.me/79956124581")],
+                [InlineKeyboardButton("Telegram", url="https://t.me/kaliroom")],
+                [InlineKeyboardButton("Показать номер", callback_data="show_phone_number")]
+            ]
+            await send_inline_message(update, context, MENU_TREE['contact']['message'], buttons)
+
+        elif user_choice == 'В начало🔙':
+            # Завершаем расчет и возвращаемся в главное меню
+            total_cost = context.user_data['total_cost']
+            selected_extras = ", ".join(context.user_data.get('selected_extras', []))
+
+            # Формируем сообщение с итоговой суммой и выбранными доп. услугами
+            final_message = f"Итоговая стоимость уборки: {total_cost:.2f} руб."
+            if selected_extras:
+                final_message += f"\nВы выбрали следующие дополнительные услуги: {selected_extras}"
+
+            await send_message(update, context, final_message, MENU_TREE['calculate_result']['options'])
+
+            # Переход в главное меню
             context.user_data['state'] = 'main_menu'
-            context.user_data.pop('selected_extras', None)
+            await send_message(update, context, MENU_TREE['main_menu']['message'], MENU_TREE['main_menu']['options'])
+
+        # Сбрасываем выбранные дополнительные услуги
+        context.user_data.pop('selected_extras', None)
 
     # Обработка ввода количества оконных створок для тарифа "мытье окон"
     if user_state == 'enter_window_panels':
