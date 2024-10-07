@@ -1,7 +1,12 @@
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from utils import send_message
+from menu_tree import MENU_TREE
+from constants import CHANNEL_ID, ADMIN_ID
+import logging
 
-async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state: str) -> None:
+logger = logging.getLogger(__name__)
+
+async def moderate_reviews(update, context, user_state):
     # Получаем все отзывы, которые ещё не обработаны
     pending_reviews = [review for review in context.application.bot_data.get('reviews', [])
                        if not review.get('approved', False) and not review.get('deleted', False)]
@@ -32,7 +37,8 @@ async def moderate_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE, u
 
     context.user_data['state'] = 'moderation_menu'
 
-async def publish_review(context: ContextTypes.DEFAULT_TYPE, review: dict) -> None:
+
+async def publish_review(context, review):
     try:
         if review['photo_file_ids']:
             if len(review['photo_file_ids']) > 1:
