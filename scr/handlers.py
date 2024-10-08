@@ -1,9 +1,16 @@
-# Содержит: Логику обработки сообщений и нажатий инлайн-кнопок.
-
-from telegram import Update
-from telegram.ext import ContextTypes
-from utils import send_message
 from menu_tree import MENU_TREE
+from utils import send_message, send_inline_message
+from admin import moderate_reviews, publish_review
+from constants import ADMIN_ID, CLEANING_PRICES, CLEANING_DETAILS
+from telegram import InlineKeyboardButton, ReplyKeyboardMarkup
+from utils import calculate_windows, send_inline_message
+from telegram.ext import ContextTypes
+from telegram import Update
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id

@@ -1,16 +1,17 @@
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 from handlers import handle_message, button_click
-from admin import moderate_reviews
+from telegram import Update
+from constants import ADMIN_ID
 from utils import send_message
 from menu_tree import MENU_TREE
 import logging
-
 
 # Настраиваем логирование
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 TOKEN = '7363733923:AAHKPw_fvjG2F3PBE2XP6Sj49u04uy7wpZE'
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
@@ -23,6 +24,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await send_message(update, context, menu['message'], menu['options'])
 
+
 def main():
     logger.info("Запуск бота")
     application = Application.builder().token(TOKEN).build()
@@ -34,6 +36,7 @@ def main():
 
     logger.info("Бот успешно запущен, начало polling...")
     application.run_polling()
+
 
 if __name__ == '__main__':
     main()
